@@ -45,3 +45,22 @@ export interface DeviceSummary {
   clock_status: string;
   sample_rate: number;
 }
+
+export type UserRole = 'admin' | 'viewer';
+
+export interface AuthUser {
+  id: number;
+  username: string;
+  email: string;
+  role: UserRole;
+}
+
+export interface UserRecord {
+  id: number;
+  username: string;
+  email: string;
+  role: UserRole;
+  created_at: string;
+  last_login_at: string | null;
+}
+

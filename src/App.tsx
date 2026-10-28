@@ -1,17 +1,24 @@
-import { useState } from 'react';
+import { useState, useEffect } from 'react';
 import { Header } from './components/layout/Header.js';
 import { PolarRadarCanvas } from './components/radar/PolarRadarCanvas.js';
 import { TelemetryGauges } from './components/metrics/TelemetryGauges.js';
 import { CalibrationPanel } from './components/calibration/CalibrationPanel.js';
 import { AcousticHeatmap } from './components/analytics/AcousticHeatmap.js';
 import { EventLogTable } from './components/analytics/EventLogTable.js';
+import { UserManagementPanel } from './components/admin/UserManagementPanel.js';
+import { AuthModal } from './components/auth/AuthModal.js';
 import { useSSEStream } from './hooks/useSSEStream.js';
 import { useDeviceConfig } from './hooks/useDeviceConfig.js';
-import { Sliders, PieChart, ListFilter } from 'lucide-react';
+import { useAuth } from './context/AuthContext.js';
+import { Sliders, PieChart, ListFilter, Users } from 'lucide-react';
+
+type TabType = 'calibration' | 'analytics' | 'logs' | 'users';
 
 export function App() {
   const [deviceId] = useState(1);
-  const [activeTab, setActiveTab] = useState<'calibration' | 'analytics' | 'logs'>('calibration');
+  const { token, isAdmin } = useAuth();
+  const [isAuthModalOpen, setIsAuthModalOpen] = useState(false);
+  const [activeTab, setActiveTab] = useState<TabType>('analytics');
 
   // Real-time Server-Sent Events stream from backend
   const { connected, recentEvents, clockSource, totalEventCount } = useSSEStream({
@@ -27,13 +34,25 @@ export function App() {
     successMsg,
     updateConfig,
     calibrateZeroAngle,
-  } = useDeviceConfig(deviceId);
+  } = useDeviceConfig(deviceId, token);
+
+  // If role changes or user logs out while viewing an admin-only tab, fall back to analytics
+  useEffect(() => {
+    if (!isAdmin && (activeTab === 'calibration' || activeTab === 'users')) {
+      setActiveTab('analytics');
+    }
+  }, [isAdmin, activeTab]);
 
   const primaryEvent = recentEvents[0];
 
   return (
     <div className="min-h-screen bg-slate-950 text-slate-100 flex flex-col font-sans">
-      <Header deviceId={deviceId} connected={connected} eventCount={totalEventCount} />
+      <Header
+        deviceId={deviceId}
+        connected={connected}
+        eventCount={totalEventCount}
+        onOpenAuth={() => setIsAuthModalOpen(true)}
+      />
 
       <main className="flex-1 max-w-7xl w-full mx-auto p-4 lg:p-8 space-y-6">
         {/* Top Hero Section: Polar Radar Scope + Live Telemetry */}
@@ -63,18 +82,20 @@ export function App() {
             />
 
             {/* Sub-card navigation tabs */}
-            <div className="flex items-center gap-2 border-b border-slate-800 pt-3">
-              <button
-                onClick={() => setActiveTab('calibration')}
-                className={`flex items-center gap-2 pb-2.5 px-3 text-xs font-semibold border-b-2 transition ${
-                  activeTab === 'calibration'
-                    ? 'border-emerald-500 text-emerald-400'
-                    : 'border-transparent text-slate-400 hover:text-white'
-                }`}
-              >
-                <Sliders className="w-4 h-4" />
-                <span>Device Calibration & Setup</span>
-              </button>
+            <div className="flex flex-wrap items-center gap-2 border-b border-slate-800 pt-3">
+              {isAdmin && (
+                <button
+                  onClick={() => setActiveTab('calibration')}
+                  className={`flex items-center gap-2 pb-2.5 px-3 text-xs font-semibold border-b-2 transition ${
+                    activeTab === 'calibration'
+                      ? 'border-emerald-500 text-emerald-400'
+                      : 'border-transparent text-slate-400 hover:text-white'
+                  }`}
+                >
+                  <Sliders className="w-4 h-4" />
+                  <span>Device Calibration & Setup</span>
+                </button>
+              )}
 
               <button
                 onClick={() => setActiveTab('analytics')}
@@ -99,11 +120,25 @@ export function App() {
                 <ListFilter className="w-4 h-4" />
                 <span>Live Event Log ({recentEvents.length})</span>
               </button>
+
+              {isAdmin && (
+                <button
+                  onClick={() => setActiveTab('users')}
+                  className={`flex items-center gap-2 pb-2.5 px-3 text-xs font-semibold border-b-2 transition ${
+                    activeTab === 'users'
+                      ? 'border-purple-500 text-purple-400'
+                      : 'border-transparent text-slate-400 hover:text-white'
+                  }`}
+                >
+                  <Users className="w-4 h-4" />
+                  <span>User Management</span>
+                </button>
+              )}
             </div>
 
             {/* Active Tab View */}
             <div>
-              {activeTab === 'calibration' && (
+              {isAdmin && activeTab === 'calibration' && (
                 <CalibrationPanel
                   config={config}
                   loading={configLoading}
@@ -117,6 +152,8 @@ export function App() {
               {activeTab === 'analytics' && <AcousticHeatmap deviceId={deviceId} />}
 
               {activeTab === 'logs' && <EventLogTable events={recentEvents} />}
+
+              {isAdmin && activeTab === 'users' && <UserManagementPanel />}
             </div>
           </div>
         </div>
@@ -125,6 +162,11 @@ export function App() {
       <footer className="border-t border-slate-900 py-4 px-6 text-center text-xs text-slate-600 font-mono">
         Acoustic Direction of Arrival Platform &bull; Seminar iz načrtovanja in razvoja programske opreme v telekomunikacijah (FE UL)
       </footer>
+
+      {/* Authentication / Registration Modal */}
+      <AuthModal isOpen={isAuthModalOpen} onClose={() => setIsAuthModalOpen(false)} />
     </div>
   );
 }
+
+export default App;

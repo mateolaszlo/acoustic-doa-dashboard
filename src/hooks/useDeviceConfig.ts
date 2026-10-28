@@ -1,7 +1,7 @@
 import { useState, useEffect, useCallback } from 'react';
 import { DeviceCalibration } from '../types/api_types.js';
 
-export function useDeviceConfig(deviceId: number) {
+export function useDeviceConfig(deviceId: number, token?: string | null) {
   const [config, setConfig] = useState<DeviceCalibration | null>(null);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -33,14 +33,22 @@ export function useDeviceConfig(deviceId: number) {
     setError(null);
     setSuccessMsg(null);
     try {
+      const headers: Record<string, string> = { 'Content-Type': 'application/json' };
+      if (token) {
+        headers['Authorization'] = `Bearer ${token}`;
+      }
+
       const res = await fetch(`/api/v1/devices/${deviceId}/config`, {
         method: 'PUT',
-        headers: { 'Content-Type': 'application/json' },
+        headers,
         body: JSON.stringify(partial),
       });
 
       if (!res.ok) {
         const body = await res.json().catch(() => ({}));
+        if (res.status === 401 || res.status === 403) {
+          throw new Error('Administrator privileges required to update calibration.');
+        }
         throw new Error(body.error?.message || `Failed to update config (HTTP ${res.status})`);
       }
 
@@ -61,14 +69,22 @@ export function useDeviceConfig(deviceId: number) {
     setLoading(true);
     setError(null);
     try {
+      const headers: Record<string, string> = { 'Content-Type': 'application/json' };
+      if (token) {
+        headers['Authorization'] = `Bearer ${token}`;
+      }
+
       const res = await fetch(`/api/v1/devices/${deviceId}/calibrate/zero-angle`, {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
+        headers,
         body: JSON.stringify({ sample_count: sampleCount }),
       });
 
       if (!res.ok) {
-        throw new Error(`Zero-angle calibration failed`);
+        if (res.status === 401 || res.status === 403) {
+          throw new Error('Administrator privileges required to trigger zero-angle trim.');
+        }
+        throw new Error('Zero-angle calibration failed');
       }
 
       const result = await res.json();
@@ -94,3 +110,5 @@ export function useDeviceConfig(deviceId: number) {
     calibrateZeroAngle,
   };
 }
+
+export default useDeviceConfig;
