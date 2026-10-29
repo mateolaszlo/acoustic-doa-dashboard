@@ -11,6 +11,7 @@ export function useSSEStream({ deviceId, maxBufferLength = 100 }: UseSSEStreamOp
   const [latestBatch, setLatestBatch] = useState<MeasurementBatchPayload | null>(null);
   const [recentEvents, setRecentEvents] = useState<MeasurementEvent[]>([]);
   const [clockSource, setClockSource] = useState<string>('UNKNOWN');
+  const [crcVerified, setCrcVerified] = useState(false);
   const [totalEventCount, setTotalEventCount] = useState(0);
 
   const eventSourceRef = useRef<EventSource | null>(null);
@@ -36,6 +37,9 @@ export function useSSEStream({ deviceId, maxBufferLength = 100 }: UseSSEStreamOp
         const batch: MeasurementBatchPayload = JSON.parse(event.data);
         setLatestBatch(batch);
         setClockSource(batch.clockSource);
+        if (batch.crcVerified !== undefined) {
+          setCrcVerified(Boolean(batch.crcVerified));
+        }
         setTotalEventCount((c) => c + batch.records.length);
 
         setRecentEvents((prev) => {
@@ -72,6 +76,7 @@ export function useSSEStream({ deviceId, maxBufferLength = 100 }: UseSSEStreamOp
     latestBatch,
     recentEvents,
     clockSource,
+    crcVerified,
     totalEventCount,
     reconnect: connect,
   };

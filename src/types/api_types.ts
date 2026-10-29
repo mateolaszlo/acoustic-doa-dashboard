@@ -11,6 +11,7 @@ export interface MeasurementBatchPayload {
   clockFlags: number;
   clockSource: 'SNTP_UTC' | 'SERVER_UTC' | 'MONOTONIC_UPTIME' | 'UNKNOWN';
   baseTimestampMs: number;
+  crcVerified?: boolean;
   records: MeasurementEvent[];
 }
 

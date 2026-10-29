@@ -5,12 +5,14 @@ import { Volume2, Navigation, Activity, Clock, ShieldCheck } from 'lucide-react'
 interface TelemetryGaugesProps {
   latestEvent?: MeasurementEvent;
   clockSource: string;
+  crcVerified?: boolean;
   connected: boolean;
 }
 
 export const TelemetryGauges: React.FC<TelemetryGaugesProps> = ({
   latestEvent,
   clockSource,
+  crcVerified,
   connected,
 }) => {
   const angle = latestEvent?.angleDeg ?? 0.0;
@@ -129,7 +131,7 @@ export const TelemetryGauges: React.FC<TelemetryGaugesProps> = ({
         </div>
         <div className="flex items-center gap-1 text-[11px] text-slate-500">
           <ShieldCheck className="w-3.5 h-3.5 text-emerald-500" />
-          <span>HTTPS / SSE Verified</span>
+          <span>{crcVerified ? 'IEEE 802.3 CRC32 Validated' : 'HTTPS / SSE Verified'}</span>
         </div>
       </div>
     </div>

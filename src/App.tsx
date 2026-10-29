@@ -21,7 +21,7 @@ export function App() {
   const [activeTab, setActiveTab] = useState<TabType>('analytics');
 
   // Real-time Server-Sent Events stream from backend
-  const { connected, recentEvents, clockSource, totalEventCount } = useSSEStream({
+  const { connected, recentEvents, clockSource, crcVerified, totalEventCount } = useSSEStream({
     deviceId,
     maxBufferLength: 100,
   });
@@ -78,6 +78,7 @@ export function App() {
             <TelemetryGauges
               latestEvent={primaryEvent}
               clockSource={clockSource}
+              crcVerified={crcVerified}
               connected={connected}
             />
 
