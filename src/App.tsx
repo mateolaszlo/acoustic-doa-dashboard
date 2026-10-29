@@ -26,6 +26,8 @@ export function App() {
   const {
     connected,
     recentEvents,
+    bufferLimit,
+    setBufferLimit,
     clockSource,
     crcVerified,
     totalEventCount,
@@ -33,7 +35,7 @@ export function App() {
     reconnect,
   } = useSSEStream({
     deviceId,
-    maxBufferLength: 100,
+    maxBufferLength: 500,
   });
 
   // Remote device configuration & calibration hook
@@ -76,8 +78,8 @@ export function App() {
       />
 
       <main className="flex-1 max-w-7xl w-full mx-auto p-4 lg:p-8 space-y-6">
-        {/* Top Hero Section: Polar Radar Scope + Live Telemetry */}
-        <div className="grid grid-cols-1 lg:grid-cols-12 gap-6 items-center">
+        {/* Top Hero Section: Polar Radar Scope + Live Telemetry Gauges (Locked Position) */}
+        <div className="grid grid-cols-1 lg:grid-cols-12 gap-6 items-start">
           {/* 360° Polar Radar Canvas */}
           <div className="lg:col-span-5 flex flex-col items-center">
             <PolarRadarCanvas latestEvents={recentEvents.slice(0, 3)} decayTimeMs={2500} showSweep={true} />
@@ -94,7 +96,7 @@ export function App() {
             </div>
           </div>
 
-          {/* Telemetry Strip & Status */}
+          {/* Telemetry Strip & Vector Summary */}
           <div className="lg:col-span-7 space-y-4">
             <TelemetryGauges
               latestEvent={primaryEvent}
@@ -103,80 +105,142 @@ export function App() {
               connected={connected}
             />
 
-            {/* Sub-card navigation tabs */}
-            <div className="flex flex-wrap items-center gap-2 border-b border-slate-800 pt-3">
-              {isAdmin && (
-                <button
-                  onClick={() => setActiveTab('calibration')}
-                  className={`flex items-center gap-2 pb-2.5 px-3 text-xs font-semibold border-b-2 transition ${
-                    activeTab === 'calibration'
-                      ? 'border-emerald-500 text-emerald-400 font-bold'
-                      : 'border-transparent text-slate-400 hover:text-white'
+            {/* Live Acoustic Vector Details Card */}
+            <div className="p-4 bg-slate-900/60 border border-slate-800 rounded-xl space-y-3 shadow-lg">
+              <div className="flex items-center justify-between border-b border-slate-800/80 pb-2">
+                <span className="text-xs font-mono uppercase text-slate-400 tracking-wider">
+                  Real-Time Acoustic Wavefront Vector
+                </span>
+                <span
+                  className={`text-[11px] font-mono font-bold px-2 py-0.5 rounded ${
+                    connected
+                      ? 'bg-emerald-950 text-emerald-400 border border-emerald-800'
+                      : 'bg-rose-950 text-rose-400 border border-rose-800'
                   }`}
                 >
-                  <Sliders className="w-4 h-4" />
-                  <span>Device Calibration & Setup</span>
-                </button>
-              )}
+                  {connected ? 'LINK ACTIVE' : 'OFFLINE'}
+                </span>
+              </div>
+              <div className="grid grid-cols-2 sm:grid-cols-4 gap-3 text-xs font-mono">
+                <div>
+                  <span className="text-slate-500 text-[10px] block">PRIMARY AZIMUTH</span>
+                  <span className="text-white font-bold text-sm">
+                    {primaryEvent
+                      ? `${primaryEvent.angleDeg > 0 ? '+' : ''}${primaryEvent.angleDeg.toFixed(1)}°`
+                      : '--'}
+                  </span>
+                </div>
+                <div>
+                  <span className="text-slate-500 text-[10px] block">WAVEFRONT DELAY</span>
+                  <span className="text-slate-300 font-bold text-sm">
+                    {primaryEvent
+                      ? `${primaryEvent.delayUs > 0 ? '+' : ''}${primaryEvent.delayUs.toFixed(1)} µs`
+                      : '--'}
+                  </span>
+                </div>
+                <div>
+                  <span className="text-slate-500 text-[10px] block">SOUND LEVEL</span>
+                  <span className="text-emerald-400 font-bold text-sm">
+                    {primaryEvent ? `${primaryEvent.soundLevelDb.toFixed(1)} dB` : '--'}
+                  </span>
+                </div>
+                <div>
+                  <span className="text-slate-500 text-[10px] block">PHAT CONFIDENCE</span>
+                  <span className="text-slate-300 font-bold text-sm">
+                    {primaryEvent ? `${Math.round(primaryEvent.confidence * 100)}%` : '--'}
+                  </span>
+                </div>
+              </div>
+            </div>
+          </div>
+        </div>
 
+        {/* Workspace Sub-Dashboard Section (Full Width, Locked Position) */}
+        <div className="space-y-4 pt-2">
+          {/* Navigation Tabs Bar */}
+          <div className="flex items-center gap-2 border-b border-slate-800 pb-px overflow-x-auto whitespace-nowrap">
+            {isAdmin && (
               <button
-                onClick={() => setActiveTab('analytics')}
-                className={`flex items-center gap-2 pb-2.5 px-3 text-xs font-semibold border-b-2 transition ${
-                  activeTab === 'analytics'
+                onClick={() => setActiveTab('calibration')}
+                className={`flex items-center gap-2 py-2.5 px-4 text-xs font-semibold border-b-2 transition shrink-0 ${
+                  activeTab === 'calibration'
                     ? 'border-emerald-500 text-emerald-400 font-bold'
                     : 'border-transparent text-slate-400 hover:text-white'
                 }`}
               >
-                <PieChart className="w-4 h-4" />
-                <span>Acoustic Heatmap & Stats</span>
+                <Sliders className="w-4 h-4" />
+                <span>Device Calibration & Setup</span>
               </button>
+            )}
 
+            <button
+              onClick={() => setActiveTab('analytics')}
+              className={`flex items-center gap-2 py-2.5 px-4 text-xs font-semibold border-b-2 transition shrink-0 ${
+                activeTab === 'analytics'
+                  ? 'border-emerald-500 text-emerald-400 font-bold'
+                  : 'border-transparent text-slate-400 hover:text-white'
+              }`}
+            >
+              <PieChart className="w-4 h-4" />
+              <span>Acoustic Heatmap & Stats</span>
+            </button>
+
+            <button
+              onClick={() => setActiveTab('logs')}
+              className={`flex items-center gap-2 py-2.5 px-4 text-xs font-semibold border-b-2 transition shrink-0 ${
+                activeTab === 'logs'
+                  ? 'border-emerald-500 text-emerald-400 font-bold'
+                  : 'border-transparent text-slate-400 hover:text-white'
+              }`}
+            >
+              <ListFilter className="w-4 h-4" />
+              <span>Live Event Log</span>
+              <span className="ml-1 text-[11px] font-mono px-2 py-0.5 rounded-full bg-slate-800 text-slate-300 border border-slate-700">
+                {recentEvents.length}
+              </span>
+            </button>
+
+            {isAdmin && (
               <button
-                onClick={() => setActiveTab('logs')}
-                className={`flex items-center gap-2 pb-2.5 px-3 text-xs font-semibold border-b-2 transition ${
-                  activeTab === 'logs'
-                    ? 'border-emerald-500 text-emerald-400 font-bold'
+                onClick={() => setActiveTab('users')}
+                className={`flex items-center gap-2 py-2.5 px-4 text-xs font-semibold border-b-2 transition shrink-0 ${
+                  activeTab === 'users'
+                    ? 'border-purple-500 text-purple-400 font-bold'
                     : 'border-transparent text-slate-400 hover:text-white'
                 }`}
               >
-                <ListFilter className="w-4 h-4" />
-                <span>Live Event Log ({recentEvents.length})</span>
+                <Users className="w-4 h-4" />
+                <span>User Management</span>
               </button>
+            )}
+          </div>
 
-              {isAdmin && (
-                <button
-                  onClick={() => setActiveTab('users')}
-                  className={`flex items-center gap-2 pb-2.5 px-3 text-xs font-semibold border-b-2 transition ${
-                    activeTab === 'users'
-                      ? 'border-purple-500 text-purple-400 font-bold'
-                      : 'border-transparent text-slate-400 hover:text-white'
-                  }`}
-                >
-                  <Users className="w-4 h-4" />
-                  <span>User Management</span>
-                </button>
-              )}
-            </div>
+          {/* Active Tab Panel */}
+          <div>
+            {isAdmin && activeTab === 'calibration' && (
+              <CalibrationPanel
+                config={config}
+                loading={configLoading}
+                error={configError}
+                successMsg={successMsg}
+                onUpdate={updateConfig}
+                onCalibrateZeroAngle={calibrateZeroAngle}
+              />
+            )}
 
-            {/* Active Tab View */}
-            <div>
-              {isAdmin && activeTab === 'calibration' && (
-                <CalibrationPanel
-                  config={config}
-                  loading={configLoading}
-                  error={configError}
-                  successMsg={successMsg}
-                  onUpdate={updateConfig}
-                  onCalibrateZeroAngle={calibrateZeroAngle}
-                />
-              )}
+            {activeTab === 'analytics' && <AcousticHeatmap deviceId={deviceId} />}
 
-              {activeTab === 'analytics' && <AcousticHeatmap deviceId={deviceId} />}
+            {activeTab === 'logs' && (
+              <EventLogTable
+                events={recentEvents}
+                totalStreamCount={totalEventCount}
+                bufferLimit={bufferLimit}
+                onSetBufferLimit={setBufferLimit}
+                onClearEvents={clearEvents}
+              />
+            )}
 
-              {activeTab === 'logs' && <EventLogTable events={recentEvents} onClearEvents={clearEvents} />}
-
-              {isAdmin && activeTab === 'users' && <UserManagementPanel />}
-            </div>
+            {isAdmin && activeTab === 'users' && <UserManagementPanel />}
           </div>
         </div>
       </main>

@@ -6,10 +6,11 @@ interface UseSSEStreamOptions {
   maxBufferLength?: number;
 }
 
-export function useSSEStream({ deviceId, maxBufferLength = 100 }: UseSSEStreamOptions) {
+export function useSSEStream({ deviceId, maxBufferLength = 500 }: UseSSEStreamOptions) {
   const [connected, setConnected] = useState(false);
   const [latestBatch, setLatestBatch] = useState<MeasurementBatchPayload | null>(null);
   const [recentEvents, setRecentEvents] = useState<MeasurementEvent[]>([]);
+  const [bufferLimit, setBufferLimit] = useState<number>(maxBufferLength);
   const [clockSource, setClockSource] = useState<string>('UNKNOWN');
   const [crcVerified, setCrcVerified] = useState(false);
   const [totalEventCount, setTotalEventCount] = useState(0);
@@ -44,7 +45,7 @@ export function useSSEStream({ deviceId, maxBufferLength = 100 }: UseSSEStreamOp
 
         setRecentEvents((prev) => {
           const combined = [...batch.records, ...prev];
-          return combined.slice(0, maxBufferLength);
+          return combined.slice(0, bufferLimit);
         });
       } catch (err) {
         console.error('[SSE] Failed to parse measurement batch:', err);
@@ -59,7 +60,7 @@ export function useSSEStream({ deviceId, maxBufferLength = 100 }: UseSSEStreamOp
       console.warn('[SSE] Connection lost, retrying automatically...');
       setConnected(false);
     };
-  }, [deviceId, maxBufferLength]);
+  }, [deviceId, bufferLimit]);
 
   useEffect(() => {
     connect();
@@ -79,6 +80,8 @@ export function useSSEStream({ deviceId, maxBufferLength = 100 }: UseSSEStreamOp
     connected,
     latestBatch,
     recentEvents,
+    bufferLimit,
+    setBufferLimit,
     clockSource,
     crcVerified,
     totalEventCount,
