@@ -7,6 +7,7 @@ interface HeaderProps {
   deviceId: number;
   connected: boolean;
   eventCount: number;
+  globalEventCount?: number;
   isAudioEnabled: boolean;
   onToggleAudio: () => void;
   onOpenAuth: () => void;
@@ -18,6 +19,7 @@ export const Header: React.FC<HeaderProps> = ({
   deviceId,
   connected,
   eventCount,
+  globalEventCount,
   isAudioEnabled,
   onToggleAudio,
   onOpenAuth,
@@ -83,23 +85,37 @@ export const Header: React.FC<HeaderProps> = ({
             )}
           </div>
 
-          {/* SSE Stream Status & Reconnect */}
-          <div className="flex items-center gap-1.5 px-3 py-1.5 bg-slate-900 border border-slate-800 rounded-lg text-xs">
+          {/* SSE Stream Status & Counter Badges */}
+          <div className="flex items-center gap-2 px-3 py-1.5 bg-slate-900 border border-slate-800 rounded-lg text-xs font-mono">
             <span
               className={`w-2 h-2 rounded-full ${
-                connected ? 'bg-emerald-400 animate-ping' : 'bg-rose-500'
+                connected ? 'bg-emerald-400 animate-pulse' : 'bg-rose-500'
               }`}
             />
-            <span className="font-mono text-slate-300">
-              {connected ? `${eventCount} events` : 'OFFLINE'}
+            <span className="text-slate-400 font-semibold">
+              {connected ? 'LIVE' : 'OFFLINE'}
             </span>
+            <span className="text-slate-700">|</span>
+            <span title="Events captured in this browser session" className="flex items-center gap-1">
+              <span className="text-emerald-400 font-bold tabular-nums">{eventCount.toLocaleString()}</span>
+              <span className="text-slate-500 text-[10px]">session</span>
+            </span>
+            {globalEventCount !== undefined && (
+              <>
+                <span className="text-slate-700">|</span>
+                <span title="Total all-time events in database" className="flex items-center gap-1">
+                  <span className="text-cyan-400 font-bold tabular-nums">{globalEventCount.toLocaleString()}</span>
+                  <span className="text-slate-500 text-[10px]">global</span>
+                </span>
+              </>
+            )}
             {!connected && onReconnect && (
               <button
                 onClick={onReconnect}
                 title="Reconnect to stream"
                 className="ml-1 p-0.5 hover:text-emerald-400 transition"
               >
-                <RefreshCw className="w-3 h-3 text-slate-400 hover:text-emerald-400 animate-spin" />
+                <RefreshCw className="w-3 h-3 text-slate-400 hover:text-emerald-400" />
               </button>
             )}
           </div>

@@ -32,6 +32,7 @@ export function App() {
     clockSource,
     crcVerified,
     totalEventCount,
+    globalEventCount,
     clearEvents,
     reconnect,
   } = useSSEStream({
@@ -71,6 +72,7 @@ export function App() {
         deviceId={deviceId}
         connected={connected}
         eventCount={totalEventCount}
+        globalEventCount={globalEventCount}
         isAudioEnabled={isAudioEnabled}
         onToggleAudio={() => setIsAudioEnabled((a) => !a)}
         onSelectDevice={setDeviceId}

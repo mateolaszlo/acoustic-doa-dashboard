@@ -14,8 +14,21 @@ export function useSSEStream({ deviceId, maxBufferLength = 500 }: UseSSEStreamOp
   const [clockSource, setClockSource] = useState<string>('UNKNOWN');
   const [crcVerified, setCrcVerified] = useState(false);
   const [totalEventCount, setTotalEventCount] = useState(0);
+  const [globalEventCount, setGlobalEventCount] = useState(0);
 
   const eventSourceRef = useRef<EventSource | null>(null);
+
+  // Fetch initial global all-time count from database
+  useEffect(() => {
+    fetch(`/api/v1/devices/${deviceId}/count`)
+      .then((res) => (res.ok ? res.json() : null))
+      .then((data) => {
+        if (data && typeof data.total === 'number') {
+          setGlobalEventCount(data.total);
+        }
+      })
+      .catch((err) => console.warn('[SSE] Failed to load global count:', err));
+  }, [deviceId]);
 
   const connect = useCallback(() => {
     if (eventSourceRef.current) {
@@ -42,6 +55,7 @@ export function useSSEStream({ deviceId, maxBufferLength = 500 }: UseSSEStreamOp
           setCrcVerified(Boolean(batch.crcVerified));
         }
         setTotalEventCount((c) => c + batch.records.length);
+        setGlobalEventCount((g) => g + batch.records.length);
 
         setRecentEvents((prev) => {
           const combined = [...batch.records, ...prev];
@@ -85,6 +99,7 @@ export function useSSEStream({ deviceId, maxBufferLength = 500 }: UseSSEStreamOp
     clockSource,
     crcVerified,
     totalEventCount,
+    globalEventCount,
     clearEvents,
     reconnect: connect,
   };
