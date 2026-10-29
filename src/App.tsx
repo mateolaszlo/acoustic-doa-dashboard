@@ -10,18 +10,28 @@ import { AuthModal } from './components/auth/AuthModal.js';
 import { useSSEStream } from './hooks/useSSEStream.js';
 import { useDeviceConfig } from './hooks/useDeviceConfig.js';
 import { useAuth } from './context/AuthContext.js';
+import { playSonarPing } from './services/audio_chime.js';
 import { Sliders, PieChart, ListFilter, Users } from 'lucide-react';
 
 type TabType = 'calibration' | 'analytics' | 'logs' | 'users';
 
 export function App() {
-  const [deviceId] = useState(1);
+  const [deviceId, setDeviceId] = useState(1);
+  const [isAudioEnabled, setIsAudioEnabled] = useState(false);
   const { token, isAdmin } = useAuth();
   const [isAuthModalOpen, setIsAuthModalOpen] = useState(false);
   const [activeTab, setActiveTab] = useState<TabType>('analytics');
 
   // Real-time Server-Sent Events stream from backend
-  const { connected, recentEvents, clockSource, crcVerified, totalEventCount } = useSSEStream({
+  const {
+    connected,
+    recentEvents,
+    clockSource,
+    crcVerified,
+    totalEventCount,
+    clearEvents,
+    reconnect,
+  } = useSSEStream({
     deviceId,
     maxBufferLength: 100,
   });
@@ -45,12 +55,23 @@ export function App() {
 
   const primaryEvent = recentEvents[0];
 
+  // Optional acoustic monitor: emit synthesized sonar chirp on high-SPL sound events
+  useEffect(() => {
+    if (isAudioEnabled && primaryEvent && primaryEvent.soundLevelDb >= 58.0) {
+      playSonarPing(primaryEvent.soundLevelDb >= 75.0 ? 1150 : 880);
+    }
+  }, [primaryEvent?.timestampMs, isAudioEnabled]);
+
   return (
     <div className="min-h-screen bg-slate-950 text-slate-100 flex flex-col font-sans">
       <Header
         deviceId={deviceId}
         connected={connected}
         eventCount={totalEventCount}
+        isAudioEnabled={isAudioEnabled}
+        onToggleAudio={() => setIsAudioEnabled((a) => !a)}
+        onSelectDevice={setDeviceId}
+        onReconnect={reconnect}
         onOpenAuth={() => setIsAuthModalOpen(true)}
       />
 
@@ -59,7 +80,7 @@ export function App() {
         <div className="grid grid-cols-1 lg:grid-cols-12 gap-6 items-center">
           {/* 360° Polar Radar Canvas */}
           <div className="lg:col-span-5 flex flex-col items-center">
-            <PolarRadarCanvas latestEvents={recentEvents.slice(0, 3)} decayTimeMs={2200} showSweep={true} />
+            <PolarRadarCanvas latestEvents={recentEvents.slice(0, 3)} decayTimeMs={2500} showSweep={true} />
             <div className="flex items-center gap-4 text-xs font-mono text-slate-400 mt-3">
               <span className="flex items-center gap-1.5">
                 <span className="w-2.5 h-2.5 rounded-full bg-emerald-500 inline-block" /> &lt;60 dB (Ambient)
@@ -89,7 +110,7 @@ export function App() {
                   onClick={() => setActiveTab('calibration')}
                   className={`flex items-center gap-2 pb-2.5 px-3 text-xs font-semibold border-b-2 transition ${
                     activeTab === 'calibration'
-                      ? 'border-emerald-500 text-emerald-400'
+                      ? 'border-emerald-500 text-emerald-400 font-bold'
                       : 'border-transparent text-slate-400 hover:text-white'
                   }`}
                 >
@@ -102,7 +123,7 @@ export function App() {
                 onClick={() => setActiveTab('analytics')}
                 className={`flex items-center gap-2 pb-2.5 px-3 text-xs font-semibold border-b-2 transition ${
                   activeTab === 'analytics'
-                    ? 'border-emerald-500 text-emerald-400'
+                    ? 'border-emerald-500 text-emerald-400 font-bold'
                     : 'border-transparent text-slate-400 hover:text-white'
                 }`}
               >
@@ -114,7 +135,7 @@ export function App() {
                 onClick={() => setActiveTab('logs')}
                 className={`flex items-center gap-2 pb-2.5 px-3 text-xs font-semibold border-b-2 transition ${
                   activeTab === 'logs'
-                    ? 'border-emerald-500 text-emerald-400'
+                    ? 'border-emerald-500 text-emerald-400 font-bold'
                     : 'border-transparent text-slate-400 hover:text-white'
                 }`}
               >
@@ -127,7 +148,7 @@ export function App() {
                   onClick={() => setActiveTab('users')}
                   className={`flex items-center gap-2 pb-2.5 px-3 text-xs font-semibold border-b-2 transition ${
                     activeTab === 'users'
-                      ? 'border-purple-500 text-purple-400'
+                      ? 'border-purple-500 text-purple-400 font-bold'
                       : 'border-transparent text-slate-400 hover:text-white'
                   }`}
                 >
@@ -152,7 +173,7 @@ export function App() {
 
               {activeTab === 'analytics' && <AcousticHeatmap deviceId={deviceId} />}
 
-              {activeTab === 'logs' && <EventLogTable events={recentEvents} />}
+              {activeTab === 'logs' && <EventLogTable events={recentEvents} onClearEvents={clearEvents} />}
 
               {isAdmin && activeTab === 'users' && <UserManagementPanel />}
             </div>

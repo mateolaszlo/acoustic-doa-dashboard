@@ -32,3 +32,28 @@ export function getSplColor(soundLevelDb: number, alpha = 1.0): string {
     return `rgba(0, 255, 102, ${alpha})`; // Green / Ambient
   }
 }
+
+export function getDirectionLabel(angleDeg: number): string {
+  const angle = normalizeAngle(angleDeg);
+  if (Math.abs(angle) <= 15) return 'FRONT';
+  if (angle > 15 && angle < 75) return 'FRONT-RIGHT';
+  if (angle >= 75 && angle <= 105) return 'RIGHT';
+  if (angle > 105 && angle < 165) return 'BACK-RIGHT';
+  if (Math.abs(angle) >= 165) return 'BACK';
+  if (angle < -15 && angle > -75) return 'FRONT-LEFT';
+  if (angle <= -75 && angle >= -105) return 'LEFT';
+  return 'BACK-LEFT';
+}
+
+export function getDirectionBadge(angleDeg: number): { label: string; badgeClass: string } {
+  const label = getDirectionLabel(angleDeg);
+  if (label === 'FRONT') {
+    return { label, badgeClass: 'bg-emerald-950/80 text-emerald-300 border-emerald-800' };
+  } else if (label.includes('RIGHT')) {
+    return { label, badgeClass: 'bg-amber-950/80 text-amber-300 border-amber-800' };
+  } else if (label.includes('LEFT')) {
+    return { label, badgeClass: 'bg-indigo-950/80 text-indigo-300 border-indigo-800' };
+  } else {
+    return { label, badgeClass: 'bg-slate-800 text-slate-300 border-slate-700' };
+  }
+}

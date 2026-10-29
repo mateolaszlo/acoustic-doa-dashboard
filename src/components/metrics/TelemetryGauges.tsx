@@ -1,6 +1,7 @@
 import React from 'react';
 import { MeasurementEvent } from '../../types/api_types.js';
 import { Volume2, Navigation, Activity, Clock, ShieldCheck } from 'lucide-react';
+import { getDirectionLabel } from '../../services/radar_math.js';
 
 interface TelemetryGaugesProps {
   latestEvent?: MeasurementEvent;
@@ -20,14 +21,7 @@ export const TelemetryGauges: React.FC<TelemetryGaugesProps> = ({
   const confidence = latestEvent?.confidence ?? 0.0;
   const delay = latestEvent?.delayUs ?? 0.0;
 
-  let directionLabel = 'FRONT';
-  if (angle > 15 && angle < 75) directionLabel = 'FRONT-RIGHT';
-  else if (angle >= 75 && angle <= 105) directionLabel = 'RIGHT (EAST)';
-  else if (angle > 105 && angle < 165) directionLabel = 'BACK-RIGHT';
-  else if (Math.abs(angle) >= 165) directionLabel = 'BACK (SOUTH)';
-  else if (angle < -15 && angle > -75) directionLabel = 'FRONT-LEFT';
-  else if (angle <= -75 && angle >= -105) directionLabel = 'LEFT (WEST)';
-  else if (angle < -105 && angle > -165) directionLabel = 'BACK-LEFT';
+  const directionLabel = latestEvent ? getDirectionLabel(angle) : 'IDLE';
 
   let splColorClass = 'text-emerald-400';
   let splBarClass = 'bg-emerald-500';

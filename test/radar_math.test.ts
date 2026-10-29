@@ -1,5 +1,11 @@
 import { describe, it, expect } from 'vitest';
-import { polarToCanvas, normalizeAngle, getSplColor } from '../src/services/radar_math.js';
+import {
+  polarToCanvas,
+  normalizeAngle,
+  getSplColor,
+  getDirectionLabel,
+  getDirectionBadge,
+} from '../src/services/radar_math.js';
 
 describe('Radar Mathematical Model', () => {
   const centerX = 200;
@@ -40,5 +46,32 @@ describe('Radar Mathematical Model', () => {
     expect(getSplColor(50.0)).toContain('0, 255, 102'); // Green (<60)
     expect(getSplColor(68.0)).toContain('255, 187, 0'); // Amber (60-75)
     expect(getSplColor(82.0)).toContain('255, 51, 102'); // Red (>75)
+  });
+
+  it('resolves cardinal directions from azimuth angle', () => {
+    expect(getDirectionLabel(0)).toBe('FRONT');
+    expect(getDirectionLabel(10)).toBe('FRONT');
+    expect(getDirectionLabel(45)).toBe('FRONT-RIGHT');
+    expect(getDirectionLabel(90)).toBe('RIGHT');
+    expect(getDirectionLabel(135)).toBe('BACK-RIGHT');
+    expect(getDirectionLabel(180)).toBe('BACK');
+    expect(getDirectionLabel(-180)).toBe('BACK');
+    expect(getDirectionLabel(-90)).toBe('LEFT');
+    expect(getDirectionLabel(-45)).toBe('FRONT-LEFT');
+    expect(getDirectionLabel(-135)).toBe('BACK-LEFT');
+  });
+
+  it('assigns themed badge classes for UI tables', () => {
+    const front = getDirectionBadge(0);
+    expect(front.label).toBe('FRONT');
+    expect(front.badgeClass).toContain('emerald');
+
+    const right = getDirectionBadge(90);
+    expect(right.label).toBe('RIGHT');
+    expect(right.badgeClass).toContain('amber');
+
+    const left = getDirectionBadge(-90);
+    expect(left.label).toBe('LEFT');
+    expect(left.badgeClass).toContain('indigo');
   });
 });

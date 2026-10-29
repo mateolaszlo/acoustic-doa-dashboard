@@ -71,6 +71,10 @@ export function useSSEStream({ deviceId, maxBufferLength = 100 }: UseSSEStreamOp
     };
   }, [connect]);
 
+  const clearEvents = useCallback(() => {
+    setRecentEvents([]);
+  }, []);
+
   return {
     connected,
     latestBatch,
@@ -78,6 +82,7 @@ export function useSSEStream({ deviceId, maxBufferLength = 100 }: UseSSEStreamOp
     clockSource,
     crcVerified,
     totalEventCount,
+    clearEvents,
     reconnect: connect,
   };
 }
