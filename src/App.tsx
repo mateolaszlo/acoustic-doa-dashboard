@@ -85,7 +85,7 @@ export function App() {
         {/* Top Hero Section: Polar Radar Scope + Live Telemetry Gauges (Locked Position) */}
         <div className="grid grid-cols-1 lg:grid-cols-12 gap-6 items-start">
           {/* 360° Polar Radar Canvas */}
-          <div className="lg:col-span-5 flex flex-col items-center">
+          <div className="lg:col-span-6 xl:col-span-5 flex flex-col items-center">
             <PolarRadarCanvas latestEvents={recentEvents.slice(0, 3)} decayTimeMs={2500} showSweep={true} />
             <div className="flex items-center gap-4 text-xs font-mono text-slate-400 mt-3">
               <span className="flex items-center gap-1.5">
@@ -101,7 +101,7 @@ export function App() {
           </div>
 
           {/* Telemetry Strip & Vector Summary */}
-          <div className="lg:col-span-7 space-y-4">
+          <div className="lg:col-span-6 xl:col-span-7 space-y-4">
             <TelemetryGauges
               latestEvent={primaryEvent}
               clockSource={clockSource}

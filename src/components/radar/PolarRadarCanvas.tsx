@@ -95,7 +95,7 @@ export const PolarRadarCanvas: React.FC<PolarRadarCanvasProps> = ({
 
       const centerX = width / 2;
       const centerY = height / 2;
-      const radius = Math.min(centerX, centerY) - 28;
+      const radius = Math.min(centerX, centerY) - 46;
 
       // 2. Outer Compass Bezel
       ctx.strokeStyle = '#1a2436';
@@ -139,29 +139,29 @@ export const PolarRadarCanvas: React.FC<PolarRadarCanvasProps> = ({
       ctx.stroke();
 
       // Cardinal & ordinal labels
-      ctx.font = '10px monospace';
+      ctx.font = 'bold 10px monospace';
       ctx.textAlign = 'center';
       ctx.textBaseline = 'middle';
 
       const isCompass = gridModeRef.current === 'compass';
       const cardinalPoints = [
-        { deg: 0, label: isCompass ? 'N (FRONT)' : 'FRONT 0°', yOffset: -12, xOffset: 0 },
-        { deg: 90, label: isCompass ? 'E (+90°)' : '+90° R', yOffset: 0, xOffset: 24 },
-        { deg: 180, label: isCompass ? 'S (±180°)' : 'BACK ±180°', yOffset: 12, xOffset: 0 },
-        { deg: -90, label: isCompass ? 'W (-90°)' : '-90° L', yOffset: 0, xOffset: -24 },
+        { deg: 0, label: isCompass ? 'N (FRONT)' : 'FRONT 0°', color: '#10b981' },
+        { deg: 90, label: isCompass ? 'E (+90°)' : '+90° R', color: '#64748b' },
+        { deg: 180, label: isCompass ? 'S (±180°)' : 'BACK ±180°', color: '#64748b' },
+        { deg: -90, label: isCompass ? 'W (-90°)' : '-90° L', color: '#64748b' },
       ];
 
       for (const pt of cardinalPoints) {
-        const pos = polarToCanvas(pt.deg, radius + 14, centerX, centerY);
-        ctx.fillStyle = pt.deg === 0 ? '#10b981' : '#64748b';
-        ctx.fillText(pt.label, pos.x + pt.xOffset, pos.y + pt.yOffset);
+        const pos = polarToCanvas(pt.deg, radius + 20, centerX, centerY);
+        ctx.fillStyle = pt.color;
+        ctx.fillText(pt.label, pos.x, pos.y);
       }
 
       // Minor radial spokes (every 30 deg)
       for (let d = -150; d <= 150; d += 30) {
         if (d % 90 === 0) continue;
         const outer = polarToCanvas(d, radius, centerX, centerY);
-        const inner = polarToCanvas(d, radius - 8, centerX, centerY);
+        const inner = polarToCanvas(d, radius - 7, centerX, centerY);
         ctx.strokeStyle = '#243247';
         ctx.beginPath();
         ctx.moveTo(inner.x, inner.y);
@@ -169,7 +169,7 @@ export const PolarRadarCanvas: React.FC<PolarRadarCanvasProps> = ({
         ctx.stroke();
 
         // Small degree tick labels at 30° / 60°
-        const labelPos = polarToCanvas(d, radius + 10, centerX, centerY);
+        const labelPos = polarToCanvas(d, radius + 14, centerX, centerY);
         ctx.fillStyle = '#475569';
         ctx.font = '8px monospace';
         ctx.fillText(`${d > 0 ? '+' : ''}${d}°`, labelPos.x, labelPos.y);
@@ -258,8 +258,8 @@ export const PolarRadarCanvas: React.FC<PolarRadarCanvasProps> = ({
             ctx.arc(needlePos.x, needlePos.y, 5, 0, Math.PI * 2);
             ctx.stroke();
 
-            // Text tag at perimeter
-            const tagPos = polarToCanvas(ev.angleDeg, radius + 24, centerX, centerY);
+            // Text tag inside perimeter ring
+            const tagPos = polarToCanvas(ev.angleDeg, radius - 15, centerX, centerY);
             ctx.fillStyle = primaryColor;
             ctx.font = 'bold 9px monospace';
             ctx.fillText(`${ev.angleDeg > 0 ? '+' : ''}${ev.angleDeg.toFixed(1)}°`, tagPos.x, tagPos.y);
@@ -276,8 +276,14 @@ export const PolarRadarCanvas: React.FC<PolarRadarCanvasProps> = ({
 
             // Smaller target bracket
             ctx.beginPath();
-            ctx.arc(needlePos.x, needlePos.y, 3.5, 0, Math.PI * 2);
+            ctx.arc(needlePos.x, needlePos.y, 4, 0, Math.PI * 2);
             ctx.stroke();
+
+            const secTagPos = polarToCanvas(ev.angleDeg, radius - 15, centerX, centerY);
+            ctx.fillStyle = 'rgba(129, 140, 248, 0.9)';
+            ctx.font = '8px monospace';
+            ctx.fillText(`${ev.angleDeg > 0 ? '+' : ''}${ev.angleDeg.toFixed(1)}°`, secTagPos.x, secTagPos.y);
+
             ctx.setLineDash([]);
           } else if (idx === 2) {
             // Tertiary source (CLEAN Pass 2): Dotted Sky-Blue beam
@@ -293,6 +299,12 @@ export const PolarRadarCanvas: React.FC<PolarRadarCanvasProps> = ({
             ctx.beginPath();
             ctx.arc(needlePos.x, needlePos.y, 3, 0, Math.PI * 2);
             ctx.stroke();
+
+            const tertTagPos = polarToCanvas(ev.angleDeg, radius - 15, centerX, centerY);
+            ctx.fillStyle = 'rgba(56, 189, 248, 0.9)';
+            ctx.font = '8px monospace';
+            ctx.fillText(`${ev.angleDeg > 0 ? '+' : ''}${ev.angleDeg.toFixed(1)}°`, tertTagPos.x, tertTagPos.y);
+
             ctx.setLineDash([]);
           }
         });
@@ -344,21 +356,21 @@ export const PolarRadarCanvas: React.FC<PolarRadarCanvasProps> = ({
   }, []);
 
   return (
-    <div className="relative w-full aspect-square max-w-[500px] mx-auto flex flex-col items-center justify-center p-3 bg-slate-950/70 rounded-2xl border border-slate-800 shadow-2xl backdrop-blur-md overflow-hidden">
-      {/* Top Floating HUD Controls */}
-      <div className="absolute top-3 left-3 right-3 flex items-center justify-between z-10 pointer-events-auto">
-        <div className="flex items-center gap-1.5">
+    <div className="w-full max-w-[540px] mx-auto flex flex-col bg-slate-900/80 border border-slate-800 rounded-2xl p-4 shadow-2xl backdrop-blur-md">
+      {/* Top HUD Controls Toolbar */}
+      <div className="flex items-center justify-between pb-3 border-b border-slate-800/80">
+        <div className="flex items-center gap-2">
           {/* Pause / Freeze Frame Toggle */}
           <button
             onClick={() => setIsFrozen((f) => !f)}
             title={isFrozen ? 'Resume live radar feed' : 'Freeze scope frame for transient inspection'}
-            className={`flex items-center gap-1 px-2.5 py-1 rounded-md text-[11px] font-semibold border transition ${
+            className={`flex items-center gap-1.5 px-2.5 py-1 rounded-lg text-xs font-semibold border transition ${
               isFrozen
                 ? 'bg-amber-950/80 border-amber-700 text-amber-300 animate-pulse'
-                : 'bg-slate-900/80 border-slate-700 text-slate-300 hover:text-white'
+                : 'bg-slate-800/90 border-slate-700 text-slate-300 hover:text-white'
             }`}
           >
-            {isFrozen ? <Play className="w-3 h-3" /> : <Pause className="w-3 h-3" />}
+            {isFrozen ? <Play className="w-3.5 h-3.5" /> : <Pause className="w-3.5 h-3.5" />}
             <span>{isFrozen ? 'FROZEN' : 'LIVE'}</span>
           </button>
 
@@ -366,7 +378,7 @@ export const PolarRadarCanvas: React.FC<PolarRadarCanvasProps> = ({
           <button
             onClick={() => setShowSweep((s) => !s)}
             title="Toggle rotating sweep line"
-            className={`p-1 rounded-md text-[11px] border transition ${
+            className={`p-1.5 rounded-lg text-xs border transition ${
               showSweep
                 ? 'bg-slate-800 border-slate-700 text-emerald-400'
                 : 'bg-slate-900 border-slate-800 text-slate-500 hover:text-slate-300'
@@ -374,14 +386,20 @@ export const PolarRadarCanvas: React.FC<PolarRadarCanvasProps> = ({
           >
             {showSweep ? <Eye className="w-3.5 h-3.5" /> : <EyeOff className="w-3.5 h-3.5" />}
           </button>
+
+          {/* Hardware Indicator Badge */}
+          <div className="hidden sm:flex items-center gap-1.5 px-2.5 py-1 bg-slate-950/60 border border-slate-800 rounded-lg text-xs font-mono text-slate-400">
+            <Radio className="w-3 h-3 text-emerald-400" />
+            <span>QUAD-MEMS 82mm</span>
+          </div>
         </div>
 
-        <div className="flex items-center gap-1.5">
+        <div className="flex items-center gap-2">
           {/* Grid Mode Toggle */}
           <button
             onClick={() => setGridMode((m) => (m === 'polar' ? 'compass' : 'polar'))}
             title="Toggle Polar degrees vs Compass navigation grid"
-            className="px-2 py-0.5 rounded text-[10px] font-mono bg-slate-900/80 border border-slate-800 text-slate-400 hover:text-slate-200 transition"
+            className="px-2.5 py-1 rounded-lg text-xs font-mono bg-slate-800/80 border border-slate-700 text-slate-300 hover:text-white transition"
           >
             {gridMode === 'polar' ? '0°..360°' : 'N/E/S/W'}
           </button>
@@ -391,7 +409,7 @@ export const PolarRadarCanvas: React.FC<PolarRadarCanvasProps> = ({
             value={decayTimeMs}
             onChange={(e) => setDecayTimeMs(parseInt(e.target.value, 10))}
             title="Phosphor trail persistence decay"
-            className="bg-slate-900/90 border border-slate-800 text-slate-300 text-[10px] font-mono rounded px-1.5 py-0.5 focus:outline-none focus:border-emerald-500 cursor-pointer"
+            className="bg-slate-800/90 border border-slate-700 text-slate-300 text-xs font-mono rounded-lg px-2 py-1 focus:outline-none focus:border-emerald-500 cursor-pointer"
           >
             <option value={1200}>Decay: 1.2s</option>
             <option value={2500}>Decay: 2.5s</option>
@@ -401,28 +419,44 @@ export const PolarRadarCanvas: React.FC<PolarRadarCanvasProps> = ({
         </div>
       </div>
 
-      {/* Main Radar Canvas */}
-      <canvas ref={canvasRef} className="w-full h-full block" />
+      {/* Main Radar Canvas Container */}
+      <div className="relative w-full aspect-square my-3 flex items-center justify-center bg-[#080c14] rounded-xl overflow-hidden border border-slate-800/60 shadow-inner">
+        <canvas ref={canvasRef} className="w-full h-full block" />
+      </div>
 
       {/* Bottom Multi-Source Beam Legend */}
-      <div className="absolute bottom-2 left-3 right-3 flex items-center justify-between text-[10px] font-mono text-slate-400 pointer-events-none">
-        <div className="flex items-center gap-1">
-          <Radio className="w-3 h-3 text-emerald-400" />
-          <span className="text-slate-300">QUAD-MEMS 82mm</span>
-        </div>
-        <div className="flex items-center gap-3">
-          <span className="flex items-center gap-1">
-            <span className="w-3 h-0.5 bg-emerald-400 inline-block" /> Primary
-          </span>
-          {latestEvents.length > 1 && (
-            <span className="flex items-center gap-1">
-              <span className="w-3 h-0.5 bg-indigo-400 border-dashed inline-block" /> Sec (CLEAN)
+      <div className="pt-2.5 border-t border-slate-800/80 flex flex-wrap items-center justify-center gap-4 text-xs font-mono">
+        <div className="flex items-center gap-1.5">
+          <span className="w-3.5 h-1 rounded-full bg-emerald-400 inline-block shadow-sm shadow-emerald-400/50" />
+          <span className="text-white font-medium">Primary</span>
+          {latestEvents[0] && (
+            <span className="text-emerald-400 font-bold ml-0.5">
+              ({latestEvents[0].angleDeg > 0 ? '+' : ''}{latestEvents[0].angleDeg.toFixed(1)}°)
             </span>
           )}
-          {latestEvents.length > 2 && (
-            <span className="flex items-center gap-1">
-              <span className="w-3 h-0.5 bg-sky-400 border-dotted inline-block" /> Tert
+        </div>
+
+        <div className="flex items-center gap-1.5">
+          <span className="w-3.5 h-1 rounded-full bg-indigo-400 border border-indigo-300/40 inline-block" />
+          <span className="text-indigo-300 font-medium">Secondary (CLEAN)</span>
+          {latestEvents[1] ? (
+            <span className="text-indigo-400 font-bold ml-0.5">
+              ({latestEvents[1].angleDeg > 0 ? '+' : ''}{latestEvents[1].angleDeg.toFixed(1)}°)
             </span>
+          ) : (
+            <span className="text-slate-600 text-[10px] ml-0.5">(Idle)</span>
+          )}
+        </div>
+
+        <div className="flex items-center gap-1.5">
+          <span className="w-3.5 h-1 rounded-full bg-sky-400 border border-sky-300/40 inline-block" />
+          <span className="text-sky-300 font-medium">Tertiary</span>
+          {latestEvents[2] ? (
+            <span className="text-sky-400 font-bold ml-0.5">
+              ({latestEvents[2].angleDeg > 0 ? '+' : ''}{latestEvents[2].angleDeg.toFixed(1)}°)
+            </span>
+          ) : (
+            <span className="text-slate-600 text-[10px] ml-0.5">(Idle)</span>
           )}
         </div>
       </div>
