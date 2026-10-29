@@ -1,12 +1,13 @@
-import { useState, useEffect } from 'react';
-import { AcousticStats } from '../../types/api_types.js';
+import { useState, useEffect, useCallback } from 'react';
+import { AcousticStats, MeasurementBatchPayload } from '../../types/api_types.js';
 import { PieChart, BarChart3, RefreshCw, Compass, RotateCcw, X } from 'lucide-react';
 
 interface AcousticHeatmapProps {
   deviceId: number;
+  latestBatch?: MeasurementBatchPayload | null;
 }
 
-export const AcousticHeatmap: React.FC<AcousticHeatmapProps> = ({ deviceId }) => {
+export const AcousticHeatmap: React.FC<AcousticHeatmapProps> = ({ deviceId, latestBatch }) => {
   const [timeframe, setTimeframe] = useState<'15m' | '1h' | '24h' | '7d'>('1h');
   const [viewMode, setViewMode] = useState<'rose' | 'spectrum'>('rose');
   const [stats, setStats] = useState<AcousticStats | null>(null);
@@ -17,40 +18,104 @@ export const AcousticHeatmap: React.FC<AcousticHeatmapProps> = ({ deviceId }) =>
     return saved ? parseInt(saved, 10) : null;
   });
 
-  const fetchStats = async () => {
-    setLoading(true);
-    try {
-      let url = `/api/v1/devices/${deviceId}/stats?timeframe=${timeframe}`;
-      if (resetSinceMs) {
-        url += `&since_ms=${resetSinceMs}`;
+  const fetchStats = useCallback(
+    async (sinceOverride?: number | null) => {
+      setLoading(true);
+      try {
+        const activeSince = sinceOverride !== undefined ? sinceOverride : resetSinceMs;
+        let url = `/api/v1/devices/${deviceId}/stats?timeframe=${timeframe}`;
+        if (activeSince) {
+          url += `&since_ms=${activeSince}`;
+        }
+        const res = await fetch(url);
+        if (res.ok) {
+          const data = await res.json();
+          setStats(data);
+        }
+      } catch (err) {
+        console.error('Failed to load stats:', err);
+      } finally {
+        setLoading(false);
       }
-      const res = await fetch(url);
-      if (res.ok) {
-        const data = await res.json();
-        setStats(data);
-      }
-    } catch (err) {
-      console.error('Failed to load stats:', err);
-    } finally {
-      setLoading(false);
-    }
-  };
+    },
+    [deviceId, timeframe, resetSinceMs]
+  );
 
+  // Periodic poll to keep database statistics aligned
   useEffect(() => {
     fetchStats();
-    const interval = setInterval(fetchStats, 10000); // Refresh every 10s
+    const interval = setInterval(() => fetchStats(), 3000);
     return () => clearInterval(interval);
-  }, [deviceId, timeframe, resetSinceMs]);
+  }, [fetchStats]);
+
+  // Real-time reactive update whenever a live SSE batch arrives
+  useEffect(() => {
+    if (!latestBatch || !latestBatch.records || latestBatch.records.length === 0) return;
+
+    setStats((prev) => {
+      if (!prev) return prev;
+
+      const newBins = [...prev.angularBins36];
+      let newCount = prev.eventCount;
+      let totalSpl = prev.avgSplDb * prev.eventCount;
+      let newPeakSpl = prev.peakSplDb;
+
+      let hasValid = false;
+      for (const rec of latestBatch.records) {
+        // If a session reset is active, ignore events from before the reset (with 500ms skew tolerance)
+        if (resetSinceMs && rec.timestampMs < resetSinceMs - 500) {
+          continue;
+        }
+
+        let normalized = rec.angleDeg + 180.0;
+        if (normalized >= 360.0) normalized = 359.9;
+        if (normalized < 0.0) normalized = 0.0;
+        const binIdx = Math.floor(normalized / 10.0);
+        newBins[binIdx] = (newBins[binIdx] || 0) + 1;
+
+        newCount++;
+        totalSpl += rec.soundLevelDb;
+        if (rec.soundLevelDb > newPeakSpl) {
+          newPeakSpl = rec.soundLevelDb;
+        }
+        hasValid = true;
+      }
+
+      if (!hasValid) return prev;
+
+      return {
+        ...prev,
+        eventCount: newCount,
+        avgSplDb: newCount > 0 ? Number((totalSpl / newCount).toFixed(1)) : 0,
+        peakSplDb: Number(newPeakSpl.toFixed(1)),
+        angularBins36: newBins,
+      };
+    });
+  }, [latestBatch, resetSinceMs]);
 
   const handleResetCounts = () => {
-    const now = Date.now();
+    // Subtract 500ms to tolerate any slight clock drift between browser and ESP32
+    const now = Date.now() - 500;
     setResetSinceMs(now);
     sessionStorage.setItem(`acoustic_stats_reset_${deviceId}`, now.toString());
+
+    // Immediate optimistic zero-reset in local state so UI updates with 0 latency
+    setStats({
+      deviceId,
+      timeframe,
+      eventCount: 0,
+      avgSplDb: 0,
+      peakSplDb: 0,
+      angularBins36: new Array(36).fill(0),
+    });
+
+    fetchStats(now);
   };
 
   const handleClearSessionReset = () => {
     setResetSinceMs(null);
     sessionStorage.removeItem(`acoustic_stats_reset_${deviceId}`);
+    fetchStats(null);
   };
 
   const bins = stats?.angularBins36 || new Array(36).fill(0);
@@ -164,7 +229,7 @@ export const AcousticHeatmap: React.FC<AcousticHeatmapProps> = ({ deviceId }) =>
 
           {/* Refresh Button */}
           <button
-            onClick={fetchStats}
+            onClick={() => fetchStats()}
             disabled={loading}
             className="p-1.5 bg-slate-800 hover:bg-slate-700 text-slate-300 rounded-lg border border-slate-700 transition"
             title="Refresh statistics"

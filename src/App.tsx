@@ -26,6 +26,7 @@ export function App() {
   const {
     connected,
     recentEvents,
+    latestBatch,
     bufferLimit,
     setBufferLimit,
     clockSource,
@@ -228,7 +229,9 @@ export function App() {
               />
             )}
 
-            {activeTab === 'analytics' && <AcousticHeatmap deviceId={deviceId} />}
+            {activeTab === 'analytics' && (
+              <AcousticHeatmap deviceId={deviceId} latestBatch={latestBatch} />
+            )}
 
             {activeTab === 'logs' && (
               <EventLogTable
