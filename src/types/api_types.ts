@@ -47,6 +47,12 @@ export interface DeviceSummary {
   sample_rate: number;
 }
 
+export interface DeviceAdminDetails extends DeviceSummary {
+  api_key?: string;
+  created_at?: string;
+  total_events?: number;
+}
+
 export type UserRole = 'admin' | 'viewer';
 
 export interface AuthUser {

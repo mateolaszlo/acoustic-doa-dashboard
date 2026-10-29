@@ -6,14 +6,15 @@ import { CalibrationPanel } from './components/calibration/CalibrationPanel.js';
 import { AcousticHeatmap } from './components/analytics/AcousticHeatmap.js';
 import { EventLogTable } from './components/analytics/EventLogTable.js';
 import { UserManagementPanel } from './components/admin/UserManagementPanel.js';
+import { NodeManagementPanel } from './components/admin/NodeManagementPanel.js';
 import { AuthModal } from './components/auth/AuthModal.js';
 import { useSSEStream } from './hooks/useSSEStream.js';
 import { useDeviceConfig } from './hooks/useDeviceConfig.js';
 import { useAuth } from './context/AuthContext.js';
 import { playSonarPing } from './services/audio_chime.js';
-import { Sliders, PieChart, ListFilter, Users } from 'lucide-react';
+import { Sliders, PieChart, ListFilter, Users, Cpu } from 'lucide-react';
 
-type TabType = 'calibration' | 'analytics' | 'logs' | 'users';
+type TabType = 'calibration' | 'analytics' | 'logs' | 'users' | 'nodes';
 
 export function App() {
   const [deviceId, setDeviceId] = useState(1);
@@ -52,7 +53,7 @@ export function App() {
 
   // If role changes or user logs out while viewing an admin-only tab, fall back to analytics
   useEffect(() => {
-    if (!isAdmin && (activeTab === 'calibration' || activeTab === 'users')) {
+    if (!isAdmin && (activeTab === 'calibration' || activeTab === 'users' || activeTab === 'nodes')) {
       setActiveTab('analytics');
     }
   }, [isAdmin, activeTab]);
@@ -205,6 +206,20 @@ export function App() {
 
             {isAdmin && (
               <button
+                onClick={() => setActiveTab('nodes')}
+                className={`flex items-center gap-2 py-2.5 px-4 text-xs font-semibold border-b-2 transition shrink-0 ${
+                  activeTab === 'nodes'
+                    ? 'border-emerald-500 text-emerald-400 font-bold'
+                    : 'border-transparent text-slate-400 hover:text-white'
+                }`}
+              >
+                <Cpu className="w-4 h-4" />
+                <span>Nodes &amp; API Keys</span>
+              </button>
+            )}
+
+            {isAdmin && (
+              <button
                 onClick={() => setActiveTab('users')}
                 className={`flex items-center gap-2 py-2.5 px-4 text-xs font-semibold border-b-2 transition shrink-0 ${
                   activeTab === 'users'
@@ -242,6 +257,13 @@ export function App() {
                 bufferLimit={bufferLimit}
                 onSetBufferLimit={setBufferLimit}
                 onClearEvents={clearEvents}
+              />
+            )}
+
+            {isAdmin && activeTab === 'nodes' && (
+              <NodeManagementPanel
+                currentDeviceId={deviceId}
+                onSelectDevice={setDeviceId}
               />
             )}
 
