@@ -8,9 +8,16 @@ A real-time, browser-based 360° polar radar visualizer, telemetry monitor, and 
 
 - **High-DPI 360° Polar Radar Scope:**
   - Real-time 60 FPS Canvas rendering matching the physical acoustic array coordinate system ($0^\circ$ Front/North, $+90^\circ$ Right/East, $\pm 180^\circ$ Back/South, $-90^\circ$ Left/West).
+  - Multi-source simultaneous beam detection displaying Primary, Secondary, and Tertiary CLEAN acoustic sources on a single-row centered HUD legend.
+  - High-contrast cardinal markings and legible radial tick degree numbers (`+30°`, `+60°`, `+90°`, `+120°`, `+150°`).
   - Analog-style phosphor persistence decay trail to visualize sound source movement and multipath reflections.
   - Sound Pressure Level (dB SPL) dynamic color coding (Green < 60 dB, Amber 60–75 dB, Crimson > 75 dB).
   - Active detection needles with vector length scaled by correlation confidence.
+- **Hardware Node & API Key Management Panel (Admin):**
+  - Dedicated administrative dashboard to provision new physical ESP32 arrays, securely reveal and copy API keys, rotate keys with instant backend invalidation, rename nodes, and decommission hardware.
+  - 2-step safe historical data purge action to reclaim database storage without resetting device calibration or interrupting active live telemetry streams.
+- **Intra-Batch Chronological Frame Sequencing:**
+  - Normalized SSE stream processing reversing batch frame sequences (newest frame first) while preserving multi-source CLEAN order within identical timestamp frames, eliminating sawtooth time jumps.
 - **Pure HTTPS REST-API & Server-Sent Events (SSE):**
   - Native browser `EventSource` connection to `GET /api/v1/devices/:id/stream` delivering sub-20ms latency updates without WebSocket protocol switching or middlebox disconnects.
 - **Remote Device Calibration Panel:**
