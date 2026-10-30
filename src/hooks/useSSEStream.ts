@@ -1,5 +1,5 @@
 import { useState, useEffect, useRef, useCallback } from 'react';
-import { MeasurementBatchPayload, MeasurementEvent } from '../types/api_types.js';
+import { MeasurementBatchPayload, MeasurementEvent, AcousticTrack } from '../types/api_types.js';
 
 interface UseSSEStreamOptions {
   deviceId: number;
@@ -10,6 +10,7 @@ export function useSSEStream({ deviceId, maxBufferLength = 500 }: UseSSEStreamOp
   const [connected, setConnected] = useState(false);
   const [latestBatch, setLatestBatch] = useState<MeasurementBatchPayload | null>(null);
   const [recentEvents, setRecentEvents] = useState<MeasurementEvent[]>([]);
+  const [activeTracks, setActiveTracks] = useState<AcousticTrack[]>([]);
   const [bufferLimit, setBufferLimit] = useState<number>(maxBufferLength);
   const [clockSource, setClockSource] = useState<string>('UNKNOWN');
   const [crcVerified, setCrcVerified] = useState(false);
@@ -57,6 +58,10 @@ export function useSSEStream({ deviceId, maxBufferLength = 500 }: UseSSEStreamOp
         setTotalEventCount((c) => c + batch.records.length);
         setGlobalEventCount((g) => g + batch.records.length);
 
+        if (batch.activeTracks && Array.isArray(batch.activeTracks)) {
+          setActiveTracks(batch.activeTracks);
+        }
+
         // Group batch records by timestampMs (each distinct timestamp is an FFT frame;
         // multiple records with the same timestamp are simultaneous CLEAN detections: Primary -> Secondary -> Tertiary).
         // Reverse frame order so newest frame is first, but preserve Primary -> Secondary -> Tertiary
@@ -100,14 +105,44 @@ export function useSSEStream({ deviceId, maxBufferLength = 500 }: UseSSEStreamOp
     };
   }, [connect]);
 
+  // Client-side active track status updates (transition to COASTING or expire if telemetry pauses)
+  useEffect(() => {
+    const timer = setInterval(() => {
+      setActiveTracks((prev) => {
+        if (prev.length === 0) return prev;
+        const now = Date.now();
+        let changed = false;
+        const next: AcousticTrack[] = [];
+        for (const t of prev) {
+          const silenceMs = now - t.lastUpdatedMs;
+          if (silenceMs > 2500) {
+            changed = true;
+            continue; // Expired
+          }
+          if (silenceMs >= 150 && t.state === 'ACTIVE') {
+            changed = true;
+            next.push({ ...t, state: 'COASTING' });
+          } else {
+            next.push(t);
+          }
+        }
+        return changed ? next : prev;
+      });
+    }, 400);
+
+    return () => clearInterval(timer);
+  }, []);
+
   const clearEvents = useCallback(() => {
     setRecentEvents([]);
+    setActiveTracks([]);
   }, []);
 
   return {
     connected,
     latestBatch,
     recentEvents,
+    activeTracks,
     bufferLimit,
     setBufferLimit,
     clockSource,

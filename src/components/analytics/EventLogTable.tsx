@@ -39,11 +39,25 @@ export const EventLogTable: React.FC<EventLogTableProps> = ({
 
   const downloadCsv = () => {
     if (events.length === 0) return;
-    const headers = ['Timestamp_ms', 'Time_ISO', 'Angle_deg', 'Direction', 'Delay_us', 'Sound_Level_dB', 'Confidence'];
+    const headers = [
+      'Timestamp_ms',
+      'Time_ISO',
+      'Track_ID',
+      'Track_Slot',
+      'Angle_deg',
+      'Smoothed_Angle_deg',
+      'Direction',
+      'Delay_us',
+      'Sound_Level_dB',
+      'Confidence',
+    ];
     const rows = filteredEvents.map((e) => [
       e.timestampMs,
       new Date(e.timestampMs).toISOString(),
+      e.trackId !== undefined ? e.trackId : '',
+      e.trackSlot !== undefined ? e.trackSlot : '',
       e.angleDeg,
+      e.smoothedAngleDeg !== undefined ? e.smoothedAngleDeg.toFixed(1) : '',
       getDirectionBadge(e.angleDeg).label,
       e.delayUs,
       e.soundLevelDb,
@@ -185,6 +199,7 @@ export const EventLogTable: React.FC<EventLogTableProps> = ({
           <thead className="bg-slate-950 text-slate-400 font-mono uppercase sticky top-0 z-10 border-b border-slate-800">
             <tr>
               <th className="py-2.5 px-4 font-medium whitespace-nowrap">Timestamp</th>
+              <th className="py-2.5 px-3 font-medium whitespace-nowrap">Track</th>
               <th className="py-2.5 px-4 font-medium whitespace-nowrap">Azimuth Angle</th>
               <th className="py-2.5 px-4 font-medium whitespace-nowrap">Cardinal Sector</th>
               <th className="py-2.5 px-4 font-medium whitespace-nowrap">Time Delay (&Delta;t)</th>
@@ -195,7 +210,7 @@ export const EventLogTable: React.FC<EventLogTableProps> = ({
           <tbody className="divide-y divide-slate-800/60 font-mono text-slate-300">
             {filteredEvents.length === 0 ? (
               <tr>
-                <td colSpan={6} className="py-8 text-center text-slate-500 italic">
+                <td colSpan={7} className="py-8 text-center text-slate-500 italic">
                   No acoustic events captured matching current filters.
                 </td>
               </tr>
@@ -212,8 +227,33 @@ export const EventLogTable: React.FC<EventLogTableProps> = ({
                         .{String(evt.timestampMs % 1000).padStart(3, '0')}
                       </span>
                     </td>
+                    <td className="py-2 px-3 whitespace-nowrap">
+                      {evt.trackId !== undefined ? (
+                        <span
+                          className={`inline-flex items-center gap-1 px-2 py-0.5 rounded text-[10px] font-bold border ${
+                            evt.trackSlot === 0
+                              ? 'bg-emerald-950 text-emerald-400 border-emerald-800'
+                              : evt.trackSlot === 1
+                              ? 'bg-indigo-950 text-indigo-400 border-indigo-800'
+                              : 'bg-sky-950 text-sky-400 border-sky-800'
+                          }`}
+                        >
+                          Track #{evt.trackId}
+                          {evt.trackState === 'COASTING' && (
+                            <span className="text-[9px] text-amber-400 font-semibold">[COAST]</span>
+                          )}
+                        </span>
+                      ) : (
+                        <span className="text-slate-600 font-mono">--</span>
+                      )}
+                    </td>
                     <td className="py-2 px-4 font-bold text-white whitespace-nowrap tabular-nums">
                       {evt.angleDeg > 0 ? `+${evt.angleDeg.toFixed(1)}` : evt.angleDeg.toFixed(1)}°
+                      {evt.smoothedAngleDeg !== undefined && (
+                        <span className="text-[10px] font-normal text-slate-400 ml-1.5" title="Kalman Filter Smoothed Azimuth">
+                          ({evt.smoothedAngleDeg > 0 ? `+${evt.smoothedAngleDeg.toFixed(1)}` : evt.smoothedAngleDeg.toFixed(1)}°)
+                        </span>
+                      )}
                     </td>
                     <td className="py-2 px-4 whitespace-nowrap">
                       <span className={`inline-flex items-center px-2 py-0.5 rounded text-[10px] font-bold border ${badge.badgeClass}`}>

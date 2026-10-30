@@ -1,8 +1,27 @@
+export interface AcousticTrack {
+  trackId: number;
+  trackSlot: number; // 0 = Primary (Emerald), 1 = Secondary (Indigo), 2 = Tertiary (Sky-Blue)
+  state: 'ACTIVE' | 'COASTING' | 'TENTATIVE';
+  angleDeg: number; // Kalman-smoothed azimuth [-180, +180]
+  rawAngleDeg: number;
+  velocityDegPerSec: number;
+  soundLevelDb: number;
+  confidence: number;
+  hits: number;
+  lastUpdatedMs: number;
+  ageMs: number;
+}
+
 export interface MeasurementEvent {
   timestampMs: number;
   rawTimestampMs?: number;
   syncQuality?: number;
   sessionId?: number;
+  trackId?: number;
+  trackSlot?: number;
+  trackState?: 'ACTIVE' | 'COASTING' | 'TENTATIVE';
+  smoothedAngleDeg?: number;
+  angularVelocityDegPerSec?: number;
   angleDeg: number;
   delayUs: number;
   soundLevelDb: number;
@@ -16,6 +35,7 @@ export interface MeasurementBatchPayload {
   baseTimestampMs: number;
   crcVerified?: boolean;
   records: MeasurementEvent[];
+  activeTracks?: AcousticTrack[];
 }
 
 export interface DeviceCalibration {

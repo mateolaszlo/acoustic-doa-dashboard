@@ -1,10 +1,11 @@
 import React, { useRef, useEffect, useState } from 'react';
-import { MeasurementEvent } from '../../types/api_types.js';
+import { MeasurementEvent, AcousticTrack } from '../../types/api_types.js';
 import { polarToCanvas, getSplColor } from '../../services/radar_math.js';
 import { Pause, Play, Eye, EyeOff, Radio } from 'lucide-react';
 
 interface PolarRadarCanvasProps {
   latestEvents: MeasurementEvent[];
+  activeTracks?: AcousticTrack[];
   decayTimeMs?: number;
   showSweep?: boolean;
 }
@@ -18,6 +19,7 @@ interface Blip {
 
 export const PolarRadarCanvas: React.FC<PolarRadarCanvasProps> = ({
   latestEvents,
+  activeTracks,
   decayTimeMs: initialDecayMs = 2500,
   showSweep: initialShowSweep = true,
 }) => {
@@ -46,6 +48,9 @@ export const PolarRadarCanvas: React.FC<PolarRadarCanvasProps> = ({
 
   const latestEventsRef = useRef(latestEvents);
   latestEventsRef.current = latestEvents;
+
+  const activeTracksRef = useRef(activeTracks);
+  activeTracksRef.current = activeTracks;
 
   // Ingest incoming measurement events into the phosphor blip trail (when not frozen)
   useEffect(() => {
@@ -230,85 +235,151 @@ export const PolarRadarCanvas: React.FC<PolarRadarCanvasProps> = ({
         ctx.fill();
       }
 
-      // 7. Multi-Source Active Beams (CLEAN Deconvolution Pass 0, 1, 2)
-      const currentEvents = latestEventsRef.current;
-      if (currentEvents.length > 0) {
-        // Multi-source colors: 0 = Primary (Green/Amber/Red SPL), 1 = Secondary (Indigo), 2 = Tertiary (Cyan)
-        currentEvents.slice(0, 3).forEach((ev, idx) => {
-          const needlePos = polarToCanvas(ev.angleDeg, radius, centerX, centerY);
+      // 7. Multi-Source Active Beams / Persistent Multi-Target Tracks
+      const activeTracksList = activeTracksRef.current;
+      if (activeTracksList !== undefined) {
+        // Multi-Target Tracking (MTT) mode: render persistent tracks by stable slot
+        activeTracksList.forEach((track) => {
+          const isCoasting = track.state === 'COASTING';
+          const angle = track.angleDeg;
+          const needlePos = polarToCanvas(angle, radius, centerX, centerY);
+          const slot = track.trackSlot ?? 0;
 
-          if (idx === 0) {
-            // Primary sound source: Solid illuminated vector beam
-            const primaryColor = getSplColor(ev.soundLevelDb, 0.95);
-            ctx.strokeStyle = primaryColor;
-            ctx.lineWidth = 2.5;
-            ctx.shadowColor = primaryColor;
-            ctx.shadowBlur = 10;
+          let strokeColor: string;
+          let textColor: string;
 
-            ctx.beginPath();
-            ctx.moveTo(centerX, centerY);
-            ctx.lineTo(needlePos.x, needlePos.y);
-            ctx.stroke();
+          if (slot === 0) {
+            strokeColor = isCoasting ? 'rgba(52, 211, 153, 0.45)' : getSplColor(track.soundLevelDb, 0.95);
+            textColor = isCoasting ? '#6ee7b7' : '#10b981';
+          } else if (slot === 1) {
+            strokeColor = isCoasting ? 'rgba(129, 140, 248, 0.45)' : 'rgba(129, 140, 248, 0.95)';
+            textColor = '#818cf8';
+          } else {
+            strokeColor = isCoasting ? 'rgba(56, 189, 248, 0.45)' : 'rgba(56, 189, 248, 0.95)';
+            textColor = '#38bdf8';
+          }
 
-            ctx.shadowBlur = 0; // Reset blur
-
-            // Outer target reticle at perimeter
-            ctx.strokeStyle = primaryColor;
-            ctx.lineWidth = 2;
-            ctx.beginPath();
-            ctx.arc(needlePos.x, needlePos.y, 5, 0, Math.PI * 2);
-            ctx.stroke();
-
-            // Text tag inside perimeter ring
-            const tagPos = polarToCanvas(ev.angleDeg, radius - 15, centerX, centerY);
-            ctx.fillStyle = primaryColor;
-            ctx.font = 'bold 9px monospace';
-            ctx.fillText(`${ev.angleDeg > 0 ? '+' : ''}${ev.angleDeg.toFixed(1)}°`, tagPos.x, tagPos.y);
-          } else if (idx === 1) {
-            // Secondary source (CLEAN Pass 1): Dashed Indigo beam
-            ctx.setLineDash([5, 4]);
-            ctx.strokeStyle = 'rgba(129, 140, 248, 0.85)';
-            ctx.lineWidth = 1.8;
-
-            ctx.beginPath();
-            ctx.moveTo(centerX, centerY);
-            ctx.lineTo(needlePos.x, needlePos.y);
-            ctx.stroke();
-
-            // Smaller target bracket
-            ctx.beginPath();
-            ctx.arc(needlePos.x, needlePos.y, 4, 0, Math.PI * 2);
-            ctx.stroke();
-
-            const secTagPos = polarToCanvas(ev.angleDeg, radius - 15, centerX, centerY);
-            ctx.fillStyle = 'rgba(129, 140, 248, 0.9)';
-            ctx.font = '8px monospace';
-            ctx.fillText(`${ev.angleDeg > 0 ? '+' : ''}${ev.angleDeg.toFixed(1)}°`, secTagPos.x, secTagPos.y);
-
-            ctx.setLineDash([]);
-          } else if (idx === 2) {
-            // Tertiary source (CLEAN Pass 2): Dotted Sky-Blue beam
-            ctx.setLineDash([2, 4]);
-            ctx.strokeStyle = 'rgba(56, 189, 248, 0.75)';
-            ctx.lineWidth = 1.4;
-
-            ctx.beginPath();
-            ctx.moveTo(centerX, centerY);
-            ctx.lineTo(needlePos.x, needlePos.y);
-            ctx.stroke();
-
-            ctx.beginPath();
-            ctx.arc(needlePos.x, needlePos.y, 3, 0, Math.PI * 2);
-            ctx.stroke();
-
-            const tertTagPos = polarToCanvas(ev.angleDeg, radius - 15, centerX, centerY);
-            ctx.fillStyle = 'rgba(56, 189, 248, 0.9)';
-            ctx.font = '8px monospace';
-            ctx.fillText(`${ev.angleDeg > 0 ? '+' : ''}${ev.angleDeg.toFixed(1)}°`, tertTagPos.x, tertTagPos.y);
-
+          if (isCoasting) {
+            ctx.setLineDash([4, 4]);
+          } else if (slot === 1) {
+            ctx.setLineDash([6, 3]);
+          } else if (slot >= 2) {
+            ctx.setLineDash([3, 3]);
+          } else {
             ctx.setLineDash([]);
           }
+
+          ctx.strokeStyle = strokeColor;
+          ctx.lineWidth = slot === 0 ? 2.5 : 1.8;
+          if (!isCoasting && slot === 0) {
+            ctx.shadowColor = strokeColor;
+            ctx.shadowBlur = 8;
+          }
+
+          ctx.beginPath();
+          ctx.moveTo(centerX, centerY);
+          ctx.lineTo(needlePos.x, needlePos.y);
+          ctx.stroke();
+
+          ctx.shadowBlur = 0;
+          ctx.setLineDash([]);
+
+          // Outer target reticle at perimeter
+          ctx.strokeStyle = strokeColor;
+          ctx.lineWidth = slot === 0 ? 2 : 1.5;
+          ctx.beginPath();
+          ctx.arc(needlePos.x, needlePos.y, slot === 0 ? 5 : 4, 0, Math.PI * 2);
+          ctx.stroke();
+
+          // Text tag inside perimeter ring
+          const tagPos = polarToCanvas(angle, radius - 15, centerX, centerY);
+          ctx.fillStyle = textColor;
+          ctx.font = 'bold 9px monospace';
+          const angleStr = `${angle > 0 ? '+' : ''}${angle.toFixed(1)}°`;
+          const coastTag = isCoasting ? ' [COAST]' : '';
+          ctx.fillText(`T${track.trackId} ${angleStr}${coastTag}`, tagPos.x, tagPos.y);
         });
+      } else {
+        // Fallback: Legacy frame-by-frame instantaneous event slice
+        const currentEvents = latestEventsRef.current;
+        if (currentEvents.length > 0) {
+          // Multi-source colors: 0 = Primary (Green/Amber/Red SPL), 1 = Secondary (Indigo), 2 = Tertiary (Cyan)
+          currentEvents.slice(0, 3).forEach((ev, idx) => {
+            const needlePos = polarToCanvas(ev.angleDeg, radius, centerX, centerY);
+
+            if (idx === 0) {
+              // Primary sound source: Solid illuminated vector beam
+              const primaryColor = getSplColor(ev.soundLevelDb, 0.95);
+              ctx.strokeStyle = primaryColor;
+              ctx.lineWidth = 2.5;
+              ctx.shadowColor = primaryColor;
+              ctx.shadowBlur = 10;
+
+              ctx.beginPath();
+              ctx.moveTo(centerX, centerY);
+              ctx.lineTo(needlePos.x, needlePos.y);
+              ctx.stroke();
+
+              ctx.shadowBlur = 0; // Reset blur
+
+              // Outer target reticle at perimeter
+              ctx.strokeStyle = primaryColor;
+              ctx.lineWidth = 2;
+              ctx.beginPath();
+              ctx.arc(needlePos.x, needlePos.y, 5, 0, Math.PI * 2);
+              ctx.stroke();
+
+              // Text tag inside perimeter ring
+              const tagPos = polarToCanvas(ev.angleDeg, radius - 15, centerX, centerY);
+              ctx.fillStyle = primaryColor;
+              ctx.font = 'bold 9px monospace';
+              ctx.fillText(`${ev.angleDeg > 0 ? '+' : ''}${ev.angleDeg.toFixed(1)}°`, tagPos.x, tagPos.y);
+            } else if (idx === 1) {
+              // Secondary source (CLEAN Pass 1): Dashed Indigo beam
+              ctx.setLineDash([5, 4]);
+              ctx.strokeStyle = 'rgba(129, 140, 248, 0.85)';
+              ctx.lineWidth = 1.8;
+
+              ctx.beginPath();
+              ctx.moveTo(centerX, centerY);
+              ctx.lineTo(needlePos.x, needlePos.y);
+              ctx.stroke();
+
+              // Smaller target bracket
+              ctx.beginPath();
+              ctx.arc(needlePos.x, needlePos.y, 4, 0, Math.PI * 2);
+              ctx.stroke();
+
+              const secTagPos = polarToCanvas(ev.angleDeg, radius - 15, centerX, centerY);
+              ctx.fillStyle = 'rgba(129, 140, 248, 0.9)';
+              ctx.font = '8px monospace';
+              ctx.fillText(`${ev.angleDeg > 0 ? '+' : ''}${ev.angleDeg.toFixed(1)}°`, secTagPos.x, secTagPos.y);
+
+              ctx.setLineDash([]);
+            } else if (idx === 2) {
+              // Tertiary source (CLEAN Pass 2): Dotted Sky-Blue beam
+              ctx.setLineDash([2, 4]);
+              ctx.strokeStyle = 'rgba(56, 189, 248, 0.75)';
+              ctx.lineWidth = 1.4;
+
+              ctx.beginPath();
+              ctx.moveTo(centerX, centerY);
+              ctx.lineTo(needlePos.x, needlePos.y);
+              ctx.stroke();
+
+              ctx.beginPath();
+              ctx.arc(needlePos.x, needlePos.y, 3, 0, Math.PI * 2);
+              ctx.stroke();
+
+              const tertTagPos = polarToCanvas(ev.angleDeg, radius - 15, centerX, centerY);
+              ctx.fillStyle = 'rgba(56, 189, 248, 0.9)';
+              ctx.font = '8px monospace';
+              ctx.fillText(`${ev.angleDeg > 0 ? '+' : ''}${ev.angleDeg.toFixed(1)}°`, tertTagPos.x, tertTagPos.y);
+
+              ctx.setLineDash([]);
+            }
+          });
+        }
       }
 
       // 8. Draw Miniature Physical Quad-Microphone Array at Center (d = 82 mm)
@@ -355,6 +426,10 @@ export const PolarRadarCanvas: React.FC<PolarRadarCanvasProps> = ({
       cancelAnimationFrame(animId);
     };
   }, []);
+
+  const trackSlot0 = activeTracks?.find((t) => t.trackSlot === 0);
+  const trackSlot1 = activeTracks?.find((t) => t.trackSlot === 1);
+  const trackSlot2 = activeTracks?.find((t) => t.trackSlot === 2);
 
   return (
     <div className="w-full max-w-[540px] mx-auto flex flex-col bg-slate-900/80 border border-slate-800 rounded-2xl p-4 shadow-2xl backdrop-blur-md">
@@ -427,35 +502,107 @@ export const PolarRadarCanvas: React.FC<PolarRadarCanvasProps> = ({
 
       {/* Bottom Multi-Source Beam Legend (Single-Row, Centered) */}
       <div className="pt-2.5 border-t border-slate-800/80 flex items-center justify-between sm:justify-center gap-2 sm:gap-6 text-[11px] sm:text-xs font-mono whitespace-nowrap overflow-x-auto">
-        <div className="flex items-center gap-1.5 shrink-0">
-          <span className="w-3.5 h-1 rounded-full bg-emerald-400 inline-block shadow-sm shadow-emerald-400/50" />
-          <span className="text-white font-semibold">Primary</span>
-          {latestEvents[0] && (
-            <span className="text-emerald-400 font-bold ml-0.5">
-              {latestEvents[0].angleDeg > 0 ? '+' : ''}{latestEvents[0].angleDeg.toFixed(1)}°
-            </span>
-          )}
-        </div>
+        {activeTracks !== undefined ? (
+          <>
+            {/* Slot 0 (Primary / Emerald) */}
+            <div className="flex items-center gap-1.5 shrink-0" title="Slot 0 persistent track (Primary)">
+              <span className="w-3.5 h-1 rounded-full bg-emerald-400 inline-block shadow-sm shadow-emerald-400/50" />
+              <span className="text-white font-semibold">
+                {trackSlot0 ? `Track #${trackSlot0.trackId}` : 'Slot 0'}
+              </span>
+              {trackSlot0 ? (
+                <>
+                  <span className={`font-bold ml-0.5 ${trackSlot0.state === 'COASTING' ? 'text-emerald-500/70' : 'text-emerald-400'}`}>
+                    {trackSlot0.angleDeg > 0 ? '+' : ''}{trackSlot0.angleDeg.toFixed(1)}°
+                  </span>
+                  {trackSlot0.state === 'COASTING' && (
+                    <span className="text-[9px] px-1 py-0.5 bg-amber-950/60 border border-amber-800/50 text-amber-400 rounded">
+                      COAST
+                    </span>
+                  )}
+                </>
+              ) : (
+                <span className="text-slate-600 font-normal ml-0.5">--</span>
+              )}
+            </div>
 
-        <div className="flex items-center gap-1.5 shrink-0" title="Secondary sound source (CLEAN deconvolution pass 1)">
-          <span className="w-3.5 h-1 rounded-full bg-indigo-400 border border-indigo-300/40 inline-block" />
-          <span className="text-indigo-300 font-semibold">Secondary</span>
-          {latestEvents[1] && (
-            <span className="text-indigo-400 font-bold ml-0.5">
-              {latestEvents[1].angleDeg > 0 ? '+' : ''}{latestEvents[1].angleDeg.toFixed(1)}°
-            </span>
-          )}
-        </div>
+            {/* Slot 1 (Secondary / Indigo) */}
+            <div className="flex items-center gap-1.5 shrink-0" title="Slot 1 persistent track (Secondary)">
+              <span className="w-3.5 h-1 rounded-full bg-indigo-400 border border-indigo-300/40 inline-block" />
+              <span className="text-indigo-300 font-semibold">
+                {trackSlot1 ? `Track #${trackSlot1.trackId}` : 'Slot 1'}
+              </span>
+              {trackSlot1 ? (
+                <>
+                  <span className={`font-bold ml-0.5 ${trackSlot1.state === 'COASTING' ? 'text-indigo-400/70' : 'text-indigo-400'}`}>
+                    {trackSlot1.angleDeg > 0 ? '+' : ''}{trackSlot1.angleDeg.toFixed(1)}°
+                  </span>
+                  {trackSlot1.state === 'COASTING' && (
+                    <span className="text-[9px] px-1 py-0.5 bg-amber-950/60 border border-amber-800/50 text-amber-400 rounded">
+                      COAST
+                    </span>
+                  )}
+                </>
+              ) : (
+                <span className="text-slate-600 font-normal ml-0.5">--</span>
+              )}
+            </div>
 
-        <div className="flex items-center gap-1.5 shrink-0" title="Tertiary sound source (CLEAN deconvolution pass 2)">
-          <span className="w-3.5 h-1 rounded-full bg-sky-400 border border-sky-300/40 inline-block" />
-          <span className="text-sky-300 font-semibold">Tertiary</span>
-          {latestEvents[2] && (
-            <span className="text-sky-400 font-bold ml-0.5">
-              {latestEvents[2].angleDeg > 0 ? '+' : ''}{latestEvents[2].angleDeg.toFixed(1)}°
-            </span>
-          )}
-        </div>
+            {/* Slot 2 (Tertiary / Sky-Blue) */}
+            <div className="flex items-center gap-1.5 shrink-0" title="Slot 2 persistent track (Tertiary)">
+              <span className="w-3.5 h-1 rounded-full bg-sky-400 border border-sky-300/40 inline-block" />
+              <span className="text-sky-300 font-semibold">
+                {trackSlot2 ? `Track #${trackSlot2.trackId}` : 'Slot 2'}
+              </span>
+              {trackSlot2 ? (
+                <>
+                  <span className={`font-bold ml-0.5 ${trackSlot2.state === 'COASTING' ? 'text-sky-400/70' : 'text-sky-400'}`}>
+                    {trackSlot2.angleDeg > 0 ? '+' : ''}{trackSlot2.angleDeg.toFixed(1)}°
+                  </span>
+                  {trackSlot2.state === 'COASTING' && (
+                    <span className="text-[9px] px-1 py-0.5 bg-amber-950/60 border border-amber-800/50 text-amber-400 rounded">
+                      COAST
+                    </span>
+                  )}
+                </>
+              ) : (
+                <span className="text-slate-600 font-normal ml-0.5">--</span>
+              )}
+            </div>
+          </>
+        ) : (
+          <>
+            <div className="flex items-center gap-1.5 shrink-0">
+              <span className="w-3.5 h-1 rounded-full bg-emerald-400 inline-block shadow-sm shadow-emerald-400/50" />
+              <span className="text-white font-semibold">Primary</span>
+              {latestEvents[0] && (
+                <span className="text-emerald-400 font-bold ml-0.5">
+                  {latestEvents[0].angleDeg > 0 ? '+' : ''}{latestEvents[0].angleDeg.toFixed(1)}°
+                </span>
+              )}
+            </div>
+
+            <div className="flex items-center gap-1.5 shrink-0" title="Secondary sound source (CLEAN deconvolution pass 1)">
+              <span className="w-3.5 h-1 rounded-full bg-indigo-400 border border-indigo-300/40 inline-block" />
+              <span className="text-indigo-300 font-semibold">Secondary</span>
+              {latestEvents[1] && (
+                <span className="text-indigo-400 font-bold ml-0.5">
+                  {latestEvents[1].angleDeg > 0 ? '+' : ''}{latestEvents[1].angleDeg.toFixed(1)}°
+                </span>
+              )}
+            </div>
+
+            <div className="flex items-center gap-1.5 shrink-0" title="Tertiary sound source (CLEAN deconvolution pass 2)">
+              <span className="w-3.5 h-1 rounded-full bg-sky-400 border border-sky-300/40 inline-block" />
+              <span className="text-sky-300 font-semibold">Tertiary</span>
+              {latestEvents[2] && (
+                <span className="text-sky-400 font-bold ml-0.5">
+                  {latestEvents[2].angleDeg > 0 ? '+' : ''}{latestEvents[2].angleDeg.toFixed(1)}°
+                </span>
+              )}
+            </div>
+          </>
+        )}
       </div>
     </div>
   );
