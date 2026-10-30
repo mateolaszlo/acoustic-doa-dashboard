@@ -57,8 +57,22 @@ export function useSSEStream({ deviceId, maxBufferLength = 500 }: UseSSEStreamOp
         setTotalEventCount((c) => c + batch.records.length);
         setGlobalEventCount((g) => g + batch.records.length);
 
+        // Group batch records by timestampMs (each distinct timestamp is an FFT frame;
+        // multiple records with the same timestamp are simultaneous CLEAN detections: Primary -> Secondary -> Tertiary).
+        // Reverse frame order so newest frame is first, but preserve Primary -> Secondary -> Tertiary
+        // order within identical timestamp frames.
+        const frames: MeasurementEvent[][] = [];
+        for (const record of batch.records) {
+          if (frames.length > 0 && frames[frames.length - 1][0].timestampMs === record.timestampMs) {
+            frames[frames.length - 1].push(record);
+          } else {
+            frames.push([record]);
+          }
+        }
+        const orderedBatchRecords = frames.reverse().flat();
+
         setRecentEvents((prev) => {
-          const combined = [...batch.records, ...prev];
+          const combined = [...orderedBatchRecords, ...prev];
           return combined.slice(0, bufferLimit);
         });
       } catch (err) {

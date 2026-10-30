@@ -1,5 +1,8 @@
 export interface MeasurementEvent {
   timestampMs: number;
+  rawTimestampMs?: number;
+  syncQuality?: number;
+  sessionId?: number;
   angleDeg: number;
   delayUs: number;
   soundLevelDb: number;
