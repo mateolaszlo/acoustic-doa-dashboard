@@ -115,11 +115,11 @@ export function useSSEStream({ deviceId, maxBufferLength = 500 }: UseSSEStreamOp
         const next: AcousticTrack[] = [];
         for (const t of prev) {
           const silenceMs = now - t.lastUpdatedMs;
-          if (silenceMs > 2500) {
+          if (silenceMs > 12000) {
             changed = true;
-            continue; // Expired
+            continue; // Expired after missed heartbeats (> 2x 5s interval)
           }
-          if (silenceMs >= 150 && t.state === 'ACTIVE') {
+          if (silenceMs >= 3500 && t.state === 'ACTIVE') {
             changed = true;
             next.push({ ...t, state: 'COASTING' });
           } else {

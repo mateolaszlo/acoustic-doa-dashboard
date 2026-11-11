@@ -18,6 +18,9 @@ interface PresetValues {
   snrMarginDb: number;
   adaptiveEnabled: boolean;
   sampleRate: number;
+  sectorWidthDeg: number;
+  sectorHysteresisDeg: number;
+  trackerHoldTimeoutMs: number;
 }
 
 const DEFAULT_PRESETS: Record<string, PresetValues> = {
@@ -28,6 +31,9 @@ const DEFAULT_PRESETS: Record<string, PresetValues> = {
     snrMarginDb: 6.0,
     adaptiveEnabled: true,
     sampleRate: 44100,
+    sectorWidthDeg: 15.0,
+    sectorHysteresisDeg: 3.0,
+    trackerHoldTimeoutMs: 2500,
   },
   noisy: {
     splThresholdDb: 68.0,
@@ -36,6 +42,9 @@ const DEFAULT_PRESETS: Record<string, PresetValues> = {
     snrMarginDb: 12.0,
     adaptiveEnabled: true,
     sampleRate: 48000,
+    sectorWidthDeg: 20.0,
+    sectorHysteresisDeg: 5.0,
+    trackerHoldTimeoutMs: 1500,
   },
   anechoic: {
     splThresholdDb: 45.0,
@@ -44,6 +53,9 @@ const DEFAULT_PRESETS: Record<string, PresetValues> = {
     snrMarginDb: 4.0,
     adaptiveEnabled: false,
     sampleRate: 48000,
+    sectorWidthDeg: 10.0,
+    sectorHysteresisDeg: 2.0,
+    trackerHoldTimeoutMs: 3000,
   },
   custom: {
     splThresholdDb: 55.0,
@@ -52,6 +64,9 @@ const DEFAULT_PRESETS: Record<string, PresetValues> = {
     snrMarginDb: 8.0,
     adaptiveEnabled: true,
     sampleRate: 44100,
+    sectorWidthDeg: 15.0,
+    sectorHysteresisDeg: 3.0,
+    trackerHoldTimeoutMs: 2500,
   },
 };
 
@@ -73,6 +88,9 @@ export const CalibrationPanel: React.FC<CalibrationPanelProps> = ({
   const [adaptiveEnabled, setAdaptiveEnabled] = useState(true);
   const [snrMarginDb, setSnrMarginDb] = useState(8.0);
   const [sampleRate, setSampleRate] = useState(44100);
+  const [sectorWidthDeg, setSectorWidthDeg] = useState(15.0);
+  const [sectorHysteresisDeg, setSectorHysteresisDeg] = useState(3.0);
+  const [trackerHoldTimeoutMs, setTrackerHoldTimeoutMs] = useState(2500);
   const [calibratingZero, setCalibratingZero] = useState(false);
   const [activePreset, setActivePreset] = useState<string>('custom');
   const [presetFeedback, setPresetFeedback] = useState<string | null>(null);
@@ -100,6 +118,9 @@ export const CalibrationPanel: React.FC<CalibrationPanelProps> = ({
       setAdaptiveEnabled(config.adaptive_threshold_enabled);
       setSnrMarginDb(config.snr_margin_db);
       setSampleRate(config.sample_rate);
+      setSectorWidthDeg(config.sector_width_deg ?? 15.0);
+      setSectorHysteresisDeg(config.sector_hysteresis_deg ?? 3.0);
+      setTrackerHoldTimeoutMs(config.tracker_hold_timeout_ms ?? 2500);
     }
   }, [config]);
 
@@ -114,6 +135,9 @@ export const CalibrationPanel: React.FC<CalibrationPanelProps> = ({
       adaptive_threshold_enabled: adaptiveEnabled,
       snr_margin_db: snrMarginDb,
       sample_rate: sampleRate,
+      sector_width_deg: sectorWidthDeg,
+      sector_hysteresis_deg: sectorHysteresisDeg,
+      tracker_hold_timeout_ms: trackerHoldTimeoutMs,
     });
   };
 
@@ -139,6 +163,9 @@ export const CalibrationPanel: React.FC<CalibrationPanelProps> = ({
     setAdaptiveEnabled(true);
     setSnrMarginDb(8.0);
     setSampleRate(44100);
+    setSectorWidthDeg(15.0);
+    setSectorHysteresisDeg(3.0);
+    setTrackerHoldTimeoutMs(2500);
     setActivePreset('custom');
   };
 
@@ -152,6 +179,9 @@ export const CalibrationPanel: React.FC<CalibrationPanelProps> = ({
     setSnrMarginDb(p.snrMarginDb);
     setAdaptiveEnabled(p.adaptiveEnabled);
     setSampleRate(p.sampleRate);
+    setSectorWidthDeg(p.sectorWidthDeg ?? 15.0);
+    setSectorHysteresisDeg(p.sectorHysteresisDeg ?? 3.0);
+    setTrackerHoldTimeoutMs(p.trackerHoldTimeoutMs ?? 2500);
   };
 
   const saveCurrentToPreset = () => {
@@ -162,6 +192,9 @@ export const CalibrationPanel: React.FC<CalibrationPanelProps> = ({
       snrMarginDb,
       adaptiveEnabled,
       sampleRate,
+      sectorWidthDeg,
+      sectorHysteresisDeg,
+      trackerHoldTimeoutMs,
     };
     const nextPresets = {
       ...presets,
@@ -480,6 +513,80 @@ export const CalibrationPanel: React.FC<CalibrationPanelProps> = ({
               <option value={48000}>48,000 Hz &bull; Professional Broadcast Audio Clock</option>
             </select>
             <span className="text-[10px] text-slate-500">Reinitializes I2S0/I2S1 peripheral clocks on the ESP32 in-place</span>
+          </div>
+        </div>
+
+        {/* Spatial Sector Tracker & Hysteresis Controls */}
+        <div className="p-4 bg-slate-950/70 border border-slate-800 rounded-xl space-y-4">
+          <div className="flex items-center justify-between border-b border-slate-800/80 pb-2">
+            <span className="text-xs font-mono uppercase text-emerald-400 font-bold tracking-wider">
+              On-Device Spatial Sector Tracker &amp; Boundary Hysteresis
+            </span>
+            <span className="text-[11px] font-mono text-slate-400">
+              Discrete {Math.round(360 / sectorWidthDeg)} Sectors (360° / {sectorWidthDeg.toFixed(0)}°)
+            </span>
+          </div>
+
+          <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+            {/* Sector Width */}
+            <div>
+              <div className="flex justify-between text-xs font-medium text-slate-300 mb-1">
+                <span>Sector Width (Δθ)</span>
+                <span className="font-mono text-emerald-400 font-bold tabular-nums">{sectorWidthDeg.toFixed(0)}°</span>
+              </div>
+              <input
+                type="range"
+                min="5"
+                max="90"
+                step="5"
+                value={sectorWidthDeg}
+                onChange={(e) => {
+                  const val = parseFloat(e.target.value);
+                  setSectorWidthDeg(val);
+                  if (sectorHysteresisDeg > val) {
+                    setSectorHysteresisDeg(val);
+                  }
+                }}
+                className="w-full accent-emerald-500 bg-slate-800 h-2 rounded-lg cursor-pointer"
+              />
+              <span className="text-[10px] text-slate-500">Discrete angular binning resolution (default: 15°)</span>
+            </div>
+
+            {/* Boundary Hysteresis */}
+            <div>
+              <div className="flex justify-between text-xs font-medium text-slate-300 mb-1">
+                <span>Schmitt Hysteresis (±)</span>
+                <span className="font-mono text-emerald-400 font-bold tabular-nums">±{sectorHysteresisDeg.toFixed(1)}°</span>
+              </div>
+              <input
+                type="range"
+                min="0"
+                max={Math.min(15, sectorWidthDeg)}
+                step="0.5"
+                value={sectorHysteresisDeg}
+                onChange={(e) => setSectorHysteresisDeg(parseFloat(e.target.value))}
+                className="w-full accent-emerald-500 bg-slate-800 h-2 rounded-lg cursor-pointer"
+              />
+              <span className="text-[10px] text-slate-500">Deadband margin beyond sector edges (≤ sector width)</span>
+            </div>
+
+            {/* Hold Timeout */}
+            <div>
+              <div className="flex justify-between text-xs font-medium text-slate-300 mb-1">
+                <span>Speech Pause Hold Timeout</span>
+                <span className="font-mono text-emerald-400 font-bold tabular-nums">{(trackerHoldTimeoutMs / 1000).toFixed(1)} s</span>
+              </div>
+              <input
+                type="range"
+                min="200"
+                max="10000"
+                step="100"
+                value={trackerHoldTimeoutMs}
+                onChange={(e) => setTrackerHoldTimeoutMs(parseInt(e.target.value, 10))}
+                className="w-full accent-emerald-500 bg-slate-800 h-2 rounded-lg cursor-pointer"
+              />
+              <span className="text-[10px] text-slate-500">Conversational pause before slot emits LEAVE (default: 2.5s)</span>
+            </div>
           </div>
         </div>
 

@@ -8,6 +8,7 @@ interface PolarRadarCanvasProps {
   activeTracks?: AcousticTrack[];
   decayTimeMs?: number;
   showSweep?: boolean;
+  sectorWidthDeg?: number;
 }
 
 interface Blip {
@@ -22,6 +23,7 @@ export const PolarRadarCanvas: React.FC<PolarRadarCanvasProps> = ({
   activeTracks,
   decayTimeMs: initialDecayMs = 2500,
   showSweep: initialShowSweep = true,
+  sectorWidthDeg = 15.0,
 }) => {
   const canvasRef = useRef<HTMLCanvasElement | null>(null);
   const blipsRef = useRef<Blip[]>([]);
@@ -34,6 +36,9 @@ export const PolarRadarCanvas: React.FC<PolarRadarCanvasProps> = ({
   const [gridMode, setGridMode] = useState<'polar' | 'compass'>('polar');
 
   // References for render loop to avoid closure capture
+  const sectorWidthDegRef = useRef(sectorWidthDeg);
+  sectorWidthDegRef.current = sectorWidthDeg;
+
   const isFrozenRef = useRef(isFrozen);
   isFrozenRef.current = isFrozen;
 
@@ -57,6 +62,8 @@ export const PolarRadarCanvas: React.FC<PolarRadarCanvasProps> = ({
     if (latestEvents.length > 0 && !isFrozen) {
       const now = Date.now();
       for (const ev of latestEvents) {
+        // Exclude LEAVE events (eventType === 4) from phosphor blip trails
+        if (ev.eventType === 4) continue;
         blipsRef.current.push({
           angleDeg: ev.angleDeg,
           soundLevelDb: ev.soundLevelDb,
@@ -244,21 +251,51 @@ export const PolarRadarCanvas: React.FC<PolarRadarCanvasProps> = ({
           const angle = track.angleDeg;
           const needlePos = polarToCanvas(angle, radius, centerX, centerY);
           const slot = track.trackSlot ?? 0;
+          const secWidth = sectorWidthDegRef.current || 15.0;
+          const halfSec = secWidth / 2.0;
 
+          // Compute sector arc boundaries in canvas radian coordinates (0 = North)
+          const startRad = ((angle - halfSec - 90) * Math.PI) / 180.0;
+          const endRad = ((angle + halfSec - 90) * Math.PI) / 180.0;
+
+          let arcFillColor: string;
           let strokeColor: string;
           let textColor: string;
 
           if (slot === 0) {
+            arcFillColor = isCoasting ? 'rgba(16, 185, 129, 0.05)' : 'rgba(16, 185, 129, 0.15)';
             strokeColor = isCoasting ? 'rgba(52, 211, 153, 0.45)' : getSplColor(track.soundLevelDb, 0.95);
             textColor = isCoasting ? '#6ee7b7' : '#10b981';
           } else if (slot === 1) {
+            arcFillColor = isCoasting ? 'rgba(129, 140, 248, 0.05)' : 'rgba(129, 140, 248, 0.15)';
             strokeColor = isCoasting ? 'rgba(129, 140, 248, 0.45)' : 'rgba(129, 140, 248, 0.95)';
             textColor = '#818cf8';
           } else {
+            arcFillColor = isCoasting ? 'rgba(56, 189, 248, 0.05)' : 'rgba(56, 189, 248, 0.15)';
             strokeColor = isCoasting ? 'rgba(56, 189, 248, 0.45)' : 'rgba(56, 189, 248, 0.95)';
             textColor = '#38bdf8';
           }
 
+          // 1. Draw Quantized Angular Sector Wedge (Arc Cone)
+          ctx.fillStyle = arcFillColor;
+          ctx.beginPath();
+          ctx.moveTo(centerX, centerY);
+          ctx.arc(centerX, centerY, radius, startRad, endRad);
+          ctx.closePath();
+          ctx.fill();
+
+          // Subtle sector boundary arc
+          ctx.strokeStyle = arcFillColor.replace('0.15', '0.40').replace('0.05', '0.20');
+          ctx.lineWidth = 1;
+          ctx.setLineDash([2, 2]);
+          ctx.beginPath();
+          ctx.moveTo(centerX, centerY);
+          ctx.arc(centerX, centerY, radius, startRad, endRad);
+          ctx.closePath();
+          ctx.stroke();
+          ctx.setLineDash([]);
+
+          // 2. Draw Vector Needle Beam
           if (isCoasting) {
             ctx.setLineDash([4, 4]);
           } else if (slot === 1) {
@@ -297,7 +334,10 @@ export const PolarRadarCanvas: React.FC<PolarRadarCanvasProps> = ({
           ctx.font = 'bold 9px monospace';
           const angleStr = `${angle > 0 ? '+' : ''}${angle.toFixed(1)}°`;
           const coastTag = isCoasting ? ' [COAST]' : '';
-          ctx.fillText(`T${track.trackId} ${angleStr}${coastTag}`, tagPos.x, tagPos.y);
+          const secTag = track.sectorId !== undefined && track.sectorId !== null && track.sectorId !== 255
+            ? ` S${track.sectorId}`
+            : '';
+          ctx.fillText(`T${track.trackId}${secTag} ${angleStr}${coastTag}`, tagPos.x, tagPos.y);
         });
       } else {
         // Fallback: Legacy frame-by-frame instantaneous event slice
@@ -508,7 +548,9 @@ export const PolarRadarCanvas: React.FC<PolarRadarCanvasProps> = ({
             <div className="flex items-center gap-1.5 shrink-0" title="Slot 0 persistent track (Primary)">
               <span className="w-3.5 h-1 rounded-full bg-emerald-400 inline-block shadow-sm shadow-emerald-400/50" />
               <span className="text-white font-semibold">
-                {trackSlot0 ? `Track #${trackSlot0.trackId}` : 'Slot 0'}
+                {trackSlot0
+                  ? `Track #${trackSlot0.trackId}${trackSlot0.sectorId !== undefined && trackSlot0.sectorId !== null && trackSlot0.sectorId !== 255 ? ` (S${trackSlot0.sectorId})` : ''}`
+                  : 'Slot 0'}
               </span>
               {trackSlot0 ? (
                 <>
@@ -530,7 +572,9 @@ export const PolarRadarCanvas: React.FC<PolarRadarCanvasProps> = ({
             <div className="flex items-center gap-1.5 shrink-0" title="Slot 1 persistent track (Secondary)">
               <span className="w-3.5 h-1 rounded-full bg-indigo-400 border border-indigo-300/40 inline-block" />
               <span className="text-indigo-300 font-semibold">
-                {trackSlot1 ? `Track #${trackSlot1.trackId}` : 'Slot 1'}
+                {trackSlot1
+                  ? `Track #${trackSlot1.trackId}${trackSlot1.sectorId !== undefined && trackSlot1.sectorId !== null && trackSlot1.sectorId !== 255 ? ` (S${trackSlot1.sectorId})` : ''}`
+                  : 'Slot 1'}
               </span>
               {trackSlot1 ? (
                 <>

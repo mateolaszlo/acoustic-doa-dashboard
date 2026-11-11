@@ -44,6 +44,9 @@ export const EventLogTable: React.FC<EventLogTableProps> = ({
       'Time_ISO',
       'Track_ID',
       'Track_Slot',
+      'Sector_ID',
+      'Event_Type',
+      'Active_Sources',
       'Angle_deg',
       'Smoothed_Angle_deg',
       'Direction',
@@ -54,8 +57,11 @@ export const EventLogTable: React.FC<EventLogTableProps> = ({
     const rows = filteredEvents.map((e) => [
       e.timestampMs,
       new Date(e.timestampMs).toISOString(),
-      e.trackId !== undefined ? e.trackId : '',
-      e.trackSlot !== undefined ? e.trackSlot : '',
+      e.trackId !== undefined && e.trackId !== null ? e.trackId : '',
+      e.trackSlot !== undefined ? e.trackSlot : (e.slotId !== undefined ? e.slotId : ''),
+      e.sectorId !== undefined && e.sectorId !== 255 ? e.sectorId : (e.sectorId === 255 ? 'LEAVE' : ''),
+      e.eventTypeName || (e.eventType ? String(e.eventType) : ''),
+      e.activeSources !== undefined ? e.activeSources : '',
       e.angleDeg,
       e.smoothedAngleDeg !== undefined ? e.smoothedAngleDeg.toFixed(1) : '',
       getDirectionBadge(e.angleDeg).label,
@@ -199,9 +205,10 @@ export const EventLogTable: React.FC<EventLogTableProps> = ({
           <thead className="bg-slate-950 text-slate-400 font-mono uppercase sticky top-0 z-10 border-b border-slate-800">
             <tr>
               <th className="py-2.5 px-4 font-medium whitespace-nowrap">Timestamp</th>
-              <th className="py-2.5 px-3 font-medium whitespace-nowrap">Track</th>
-              <th className="py-2.5 px-4 font-medium whitespace-nowrap">Azimuth Angle</th>
-              <th className="py-2.5 px-4 font-medium whitespace-nowrap">Cardinal Sector</th>
+              <th className="py-2.5 px-3 font-medium whitespace-nowrap">Track / Slot</th>
+              <th className="py-2.5 px-3 font-medium whitespace-nowrap">Transition</th>
+              <th className="py-2.5 px-4 font-medium whitespace-nowrap">Azimuth</th>
+              <th className="py-2.5 px-4 font-medium whitespace-nowrap">Sector &amp; Heading</th>
               <th className="py-2.5 px-4 font-medium whitespace-nowrap">Time Delay (&Delta;t)</th>
               <th className="py-2.5 px-4 font-medium whitespace-nowrap">Sound Pressure</th>
               <th className="py-2.5 px-4 font-medium whitespace-nowrap">Confidence</th>
@@ -210,7 +217,7 @@ export const EventLogTable: React.FC<EventLogTableProps> = ({
           <tbody className="divide-y divide-slate-800/60 font-mono text-slate-300">
             {filteredEvents.length === 0 ? (
               <tr>
-                <td colSpan={7} className="py-8 text-center text-slate-500 italic">
+                <td colSpan={8} className="py-8 text-center text-slate-500 italic">
                   No acoustic events captured matching current filters.
                 </td>
               </tr>
@@ -228,12 +235,12 @@ export const EventLogTable: React.FC<EventLogTableProps> = ({
                       </span>
                     </td>
                     <td className="py-2 px-3 whitespace-nowrap">
-                      {evt.trackId !== undefined ? (
+                      {evt.trackId !== undefined && evt.trackId !== null ? (
                         <span
                           className={`inline-flex items-center gap-1 px-2 py-0.5 rounded text-[10px] font-bold border ${
-                            evt.trackSlot === 0
+                            (evt.trackSlot ?? evt.slotId) === 0
                               ? 'bg-emerald-950 text-emerald-400 border-emerald-800'
-                              : evt.trackSlot === 1
+                              : (evt.trackSlot ?? evt.slotId) === 1
                               ? 'bg-indigo-950 text-indigo-400 border-indigo-800'
                               : 'bg-sky-950 text-sky-400 border-sky-800'
                           }`}
@@ -242,6 +249,25 @@ export const EventLogTable: React.FC<EventLogTableProps> = ({
                           {evt.trackState === 'COASTING' && (
                             <span className="text-[9px] text-amber-400 font-semibold">[COAST]</span>
                           )}
+                        </span>
+                      ) : (
+                        <span className="text-slate-600 font-mono">--</span>
+                      )}
+                    </td>
+                    <td className="py-2 px-3 whitespace-nowrap">
+                      {evt.eventTypeName ? (
+                        <span
+                          className={`inline-flex items-center px-2 py-0.5 rounded text-[10px] font-bold border ${
+                            evt.eventTypeName === 'ENTER'
+                              ? 'bg-emerald-950 text-emerald-400 border-emerald-800'
+                              : evt.eventTypeName === 'MOVE'
+                              ? 'bg-sky-950 text-sky-400 border-sky-800'
+                              : evt.eventTypeName === 'HEARTBEAT'
+                              ? 'bg-slate-800 text-slate-300 border-slate-700'
+                              : 'bg-rose-950 text-rose-400 border-rose-800'
+                          }`}
+                        >
+                          {evt.eventTypeName}
                         </span>
                       ) : (
                         <span className="text-slate-600 font-mono">--</span>
@@ -256,9 +282,20 @@ export const EventLogTable: React.FC<EventLogTableProps> = ({
                       )}
                     </td>
                     <td className="py-2 px-4 whitespace-nowrap">
-                      <span className={`inline-flex items-center px-2 py-0.5 rounded text-[10px] font-bold border ${badge.badgeClass}`}>
-                        {badge.label}
-                      </span>
+                      <div className="flex items-center gap-1.5">
+                        {evt.sectorId !== undefined && evt.sectorId !== 255 ? (
+                          <span className="inline-flex items-center px-1.5 py-0.5 rounded text-[10px] font-mono font-bold bg-slate-800 text-slate-200 border border-slate-700">
+                            Sec #{evt.sectorId}
+                          </span>
+                        ) : evt.sectorId === 255 ? (
+                          <span className="inline-flex items-center px-1.5 py-0.5 rounded text-[10px] font-mono text-slate-500 border border-slate-800">
+                            Sec --
+                          </span>
+                        ) : null}
+                        <span className={`inline-flex items-center px-2 py-0.5 rounded text-[10px] font-bold border ${badge.badgeClass}`}>
+                          {badge.label}
+                        </span>
+                      </div>
                     </td>
                     <td className="py-2 px-4 text-slate-400 whitespace-nowrap tabular-nums">
                       {evt.delayUs > 0 ? `+${evt.delayUs.toFixed(1)}` : evt.delayUs.toFixed(1)} &mu;s

@@ -87,7 +87,13 @@ export function App() {
         <div className="grid grid-cols-1 lg:grid-cols-12 gap-6 items-start">
           {/* 360° Polar Radar Canvas */}
           <div className="lg:col-span-6 xl:col-span-5 flex flex-col items-center">
-            <PolarRadarCanvas latestEvents={recentEvents.slice(0, 3)} activeTracks={activeTracks} decayTimeMs={2500} showSweep={true} />
+            <PolarRadarCanvas
+              latestEvents={recentEvents.slice(0, 3)}
+              activeTracks={activeTracks}
+              decayTimeMs={2500}
+              showSweep={true}
+              sectorWidthDeg={config?.sector_width_deg ?? 15.0}
+            />
             <div className="flex items-center gap-4 text-xs font-mono text-slate-400 mt-3">
               <span className="flex items-center gap-1.5">
                 <span className="w-2.5 h-2.5 rounded-full bg-emerald-500 inline-block" /> &lt;60 dB (Ambient)

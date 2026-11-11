@@ -1,7 +1,12 @@
+export type SectorEventType = 1 | 2 | 3 | 4;
+export type SectorEventName = 'ENTER' | 'MOVE' | 'HEARTBEAT' | 'LEAVE';
+
 export interface AcousticTrack {
   trackId: number;
   trackSlot: number; // 0 = Primary (Emerald), 1 = Secondary (Indigo), 2 = Tertiary (Sky-Blue)
-  state: 'ACTIVE' | 'COASTING' | 'TENTATIVE';
+  sectorId?: number | null;
+  lastEventType?: SectorEventName | null;
+  state: 'ACTIVE' | 'COASTING' | 'TENTATIVE' | 'DELETED';
   angleDeg: number; // Kalman-smoothed azimuth [-180, +180]
   rawAngleDeg: number;
   velocityDegPerSec: number;
@@ -19,7 +24,12 @@ export interface MeasurementEvent {
   sessionId?: number;
   trackId?: number;
   trackSlot?: number;
-  trackState?: 'ACTIVE' | 'COASTING' | 'TENTATIVE';
+  trackState?: 'ACTIVE' | 'COASTING' | 'TENTATIVE' | 'DELETED';
+  slotId?: number;
+  sectorId?: number;
+  eventType?: SectorEventType;
+  eventTypeName?: SectorEventName;
+  activeSources?: number;
   smoothedAngleDeg?: number;
   angularVelocityDegPerSec?: number;
   angleDeg: number;
@@ -49,6 +59,9 @@ export interface DeviceCalibration {
   angle_offset_deg: number;
   adaptive_threshold_enabled: boolean;
   snr_margin_db: number;
+  sector_width_deg: number;
+  sector_hysteresis_deg: number;
+  tracker_hold_timeout_ms: number;
   server_time_unix_ms: number;
 }
 
