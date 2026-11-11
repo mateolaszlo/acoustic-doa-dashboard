@@ -752,9 +752,11 @@ export const SmartRoomDirectorCanvas: React.FC<SmartRoomDirectorCanvasProps> = (
 
       if (track0) {
         const pos0 = calculateTablePerimeterPos(centerX, centerY, track0.angleDeg, layout, BASE_ROOM_WIDTH, BASE_ROOM_HEIGHT);
+        const canonicalPos0 = calculateTablePerimeterPos(BASE_ROOM_CENTER_X, BASE_ROOM_CENTER_Y, track0.angleDeg, layout, BASE_ROOM_WIDTH, BASE_ROOM_HEIGHT);
         speakerTargets.push({
           slotId: 0,
           pos: pos0,
+          canonicalPos: canonicalPos0,
           angleDeg: track0.angleDeg,
           isActive: track0.state === 'ACTIVE',
           splDb: track0.soundLevelDb,
@@ -765,9 +767,11 @@ export const SmartRoomDirectorCanvas: React.FC<SmartRoomDirectorCanvasProps> = (
 
       if (track1) {
         const pos1 = calculateTablePerimeterPos(centerX, centerY, track1.angleDeg, layout, BASE_ROOM_WIDTH, BASE_ROOM_HEIGHT);
+        const canonicalPos1 = calculateTablePerimeterPos(BASE_ROOM_CENTER_X, BASE_ROOM_CENTER_Y, track1.angleDeg, layout, BASE_ROOM_WIDTH, BASE_ROOM_HEIGHT);
         speakerTargets.push({
           slotId: 1,
           pos: pos1,
+          canonicalPos: canonicalPos1,
           angleDeg: track1.angleDeg,
           isActive: track1.state === 'ACTIVE',
           splDb: track1.soundLevelDb,
@@ -777,14 +781,18 @@ export const SmartRoomDirectorCanvas: React.FC<SmartRoomDirectorCanvasProps> = (
       }
 
       // Fallback: If no tracks exist (neither active nor coasting), inspect newest fresh raw event (< 500ms)
+      // IMPORTANT: Exclude LEAVE events (eventType === 4), DELETED records, and zero-source arrivals
       if (speakerTargets.length === 0 && latestEventsRef.current.length > 0) {
         const latest = latestEventsRef.current[0]; // Newest-first: index 0 is newest!
-        if (latest && Date.now() - latest.timestampMs < 500 && latest.soundLevelDb >= 50) {
+        const isLeave = latest.eventType === 4 || latest.eventTypeName === 'LEAVE' || latest.trackState === 'DELETED';
+        if (latest && !isLeave && Date.now() - latest.timestampMs < 500 && latest.soundLevelDb >= 50) {
           const slot = latest.slotId ?? 0;
           const pos = calculateTablePerimeterPos(centerX, centerY, latest.angleDeg, layout, BASE_ROOM_WIDTH, BASE_ROOM_HEIGHT);
+          const canonicalPos = calculateTablePerimeterPos(BASE_ROOM_CENTER_X, BASE_ROOM_CENTER_Y, latest.angleDeg, layout, BASE_ROOM_WIDTH, BASE_ROOM_HEIGHT);
           speakerTargets.push({
             slotId: slot,
             pos,
+            canonicalPos,
             angleDeg: latest.angleDeg,
             isActive: true,
             splDb: latest.soundLevelDb,
@@ -799,11 +807,12 @@ export const SmartRoomDirectorCanvas: React.FC<SmartRoomDirectorCanvasProps> = (
       // 7. Process Multi-Camera Broadcast Assignment & Sticky Memory
       const { activeCamera } = onProcessFrameRef.current(speakerTargets, BASE_ROOM_WIDTH, BASE_ROOM_HEIGHT, dt);
 
-      if (activeCamera && speakerTargets.some((s) => s.isActive)) {
+      if (activeCamera && (activeCamera.isLockedOnSubject || speakerTargets.length > 0)) {
         const aimDeg = Math.round(activeCamera.currentPanDeg);
         const role = activeCamera.role === 'front' ? 'FRONT' : activeCamera.role === 'rear' ? 'REAR' : 'SIDE';
+        const lockTag = speakerTargets.some((s) => s.isActive) ? 'LIVE' : 'HOLD';
         setCameraStatus(
-          `[LIVE: ${role}] ${aimDeg > 0 ? '+' : ''}${aimDeg}° • ${resolvedZone.toUpperCase()}`
+          `[${lockTag}: ${role}] ${aimDeg > 0 ? '+' : ''}${aimDeg}° • ${resolvedZone.toUpperCase()}`
         );
       } else {
         setCameraStatus('STANDBY • 3-NODE READY');

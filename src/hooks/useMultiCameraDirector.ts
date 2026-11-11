@@ -20,6 +20,7 @@ import {
 export interface ActiveSpeakerTarget {
   slotId: number;
   pos: { x: number; y: number };
+  canonicalPos?: { x: number; y: number };
   angleDeg: number;
   isActive: boolean;
   splDb: number;
@@ -268,12 +269,12 @@ export function useMultiCameraDirector({
         lastRoomAudioTimeRef.current = now;
       }
 
-      // If no backend director telemetry is connected, run local target computation
-      const hasRecentBackendTelemetry =
-        latestDirectorState && now - (latestDirectorState.updatedAtMs || 0) < 2000;
+      // Backend director telemetry is authoritative when connected via SSE.
+      // Do not expire backend telemetry during natural speech pauses or quiet periods!
+      const hasBackendTelemetry = Boolean(latestDirectorState);
 
-      if (!hasRecentBackendTelemetry) {
-        // Fallback local allocation across candidates (including coasting speakers during pauses)
+      if (!hasBackendTelemetry) {
+        // Fallback local allocation across candidates (only used when running standalone without backend)
         const candidateSpeakers = speakers;
         const candidateSlotIds = new Set(candidateSpeakers.map((s) => s.slotId));
         currentCameras = currentCameras.map((c) => {
@@ -285,9 +286,10 @@ export function useMultiCameraDirector({
 
         if (candidateSpeakers.length === 1) {
           const spk = candidateSpeakers[0];
+          const targetCoord = spk.canonicalPos || spk.pos;
           const scored = currentCameras.map((cam) => ({
             cam,
-            score: scoreCameraCandidate(cam, spk.pos, spk.angleDeg, roomWidth, roomHeight),
+            score: scoreCameraCandidate(cam, targetCoord, spk.angleDeg, roomWidth, roomHeight),
           }));
           scored.sort((a, b) => b.score - a.score);
 
@@ -299,7 +301,7 @@ export function useMultiCameraDirector({
                     ...c,
                     assignedTargetSlot: spk.slotId,
                     isLockedOnSubject: true,
-                    lastTargetPos: spk.pos,
+                    lastTargetPos: targetCoord,
                   }
                 : c.assignedTargetSlot === spk.slotId
                 ? { ...c, assignedTargetSlot: null, isLockedOnSubject: false }
@@ -308,14 +310,14 @@ export function useMultiCameraDirector({
           }
         }
 
-        // Compute pan target
+        // Compute pan target using canonical room coordinates
         currentCameras = currentCameras.map((cam) => {
           const camX = cam.xRatio * roomWidth;
           const camY = cam.yRatio * roomHeight;
 
           if (cam.assignedTargetSlot !== null) {
             const boundSpeaker = speakers.find((s) => s.slotId === cam.assignedTargetSlot);
-            const targetPos = boundSpeaker?.pos || cam.lastTargetPos;
+            const targetPos = boundSpeaker?.canonicalPos || boundSpeaker?.pos || cam.lastTargetPos;
             if (targetPos) {
               return {
                 ...cam,
