@@ -273,17 +273,18 @@ export function useMultiCameraDirector({
         latestDirectorState && now - (latestDirectorState.updatedAtMs || 0) < 2000;
 
       if (!hasRecentBackendTelemetry) {
-        // Fallback local allocation
-        const activeSlotIds = new Set(activeSpeakers.map((s) => s.slotId));
+        // Fallback local allocation across candidates (including coasting speakers during pauses)
+        const candidateSpeakers = speakers;
+        const candidateSlotIds = new Set(candidateSpeakers.map((s) => s.slotId));
         currentCameras = currentCameras.map((c) => {
-          if (c.assignedTargetSlot !== null && !activeSlotIds.has(c.assignedTargetSlot)) {
+          if (c.assignedTargetSlot !== null && !candidateSlotIds.has(c.assignedTargetSlot)) {
             return { ...c, assignedTargetSlot: null, isLockedOnSubject: false };
           }
           return c;
         });
 
-        if (activeSpeakers.length === 1) {
-          const spk = activeSpeakers[0];
+        if (candidateSpeakers.length === 1) {
+          const spk = candidateSpeakers[0];
           const scored = currentCameras.map((cam) => ({
             cam,
             score: scoreCameraCandidate(cam, spk.pos, spk.angleDeg, roomWidth, roomHeight),

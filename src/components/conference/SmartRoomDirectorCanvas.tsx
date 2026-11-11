@@ -745,8 +745,8 @@ export const SmartRoomDirectorCanvas: React.FC<SmartRoomDirectorCanvasProps> = (
       const tracks = activeTracksRef.current;
       const speakerTargets: ActiveSpeakerTarget[] = [];
 
-      const track0 = tracks.find((t) => t.trackSlot === 0 && t.state === 'ACTIVE');
-      const track1 = tracks.find((t) => t.trackSlot === 1 && t.state === 'ACTIVE');
+      const track0 = tracks.find((t) => t.trackSlot === 0 && (t.state === 'ACTIVE' || t.state === 'COASTING'));
+      const track1 = tracks.find((t) => t.trackSlot === 1 && (t.state === 'ACTIVE' || t.state === 'COASTING'));
 
       let resolvedZone = 'Unassigned';
 
@@ -756,7 +756,7 @@ export const SmartRoomDirectorCanvas: React.FC<SmartRoomDirectorCanvasProps> = (
           slotId: 0,
           pos: pos0,
           angleDeg: track0.angleDeg,
-          isActive: true,
+          isActive: track0.state === 'ACTIVE',
           splDb: track0.soundLevelDb,
         });
         const z0 = resolveSpatialZone(track0.angleDeg, zonesRef.current);
@@ -769,17 +769,17 @@ export const SmartRoomDirectorCanvas: React.FC<SmartRoomDirectorCanvasProps> = (
           slotId: 1,
           pos: pos1,
           angleDeg: track1.angleDeg,
-          isActive: true,
+          isActive: track1.state === 'ACTIVE',
           splDb: track1.soundLevelDb,
         });
         const z1 = resolveSpatialZone(track1.angleDeg, zonesRef.current);
         if (z1) resolvedZone = z1.name;
       }
 
-      // Fallback: If no tracks exist, inspect recent event
+      // Fallback: If no tracks exist (neither active nor coasting), inspect newest fresh raw event (< 500ms)
       if (speakerTargets.length === 0 && latestEventsRef.current.length > 0) {
-        const latest = latestEventsRef.current[latestEventsRef.current.length - 1];
-        if (Date.now() - latest.timestampMs < 1600 && latest.soundLevelDb >= 50) {
+        const latest = latestEventsRef.current[0]; // Newest-first: index 0 is newest!
+        if (latest && Date.now() - latest.timestampMs < 500 && latest.soundLevelDb >= 50) {
           const slot = latest.slotId ?? 0;
           const pos = calculateTablePerimeterPos(centerX, centerY, latest.angleDeg, layout, BASE_ROOM_WIDTH, BASE_ROOM_HEIGHT);
           speakerTargets.push({
@@ -983,34 +983,36 @@ export const SmartRoomDirectorCanvas: React.FC<SmartRoomDirectorCanvasProps> = (
         const sy = spk.pos.y;
         const color = spk.slotId === 0 ? '#10b981' : '#818cf8';
 
-        // Ripple pulse
-        const ripplePhase = (time % 1200) / 1200;
-        const rippleRadius = 14 + ripplePhase * 20;
-        ctx.beginPath();
-        ctx.arc(sx, sy, rippleRadius, 0, Math.PI * 2);
-        ctx.strokeStyle = `${color}${Math.floor((1 - ripplePhase) * 200)
-          .toString(16)
-          .padStart(2, '0')}`;
-        ctx.lineWidth = 1.5;
-        ctx.stroke();
+        // Ripple pulse ONLY when actively speaking (not during pauses/coasting)
+        if (spk.isActive) {
+          const ripplePhase = (time % 1200) / 1200;
+          const rippleRadius = 14 + ripplePhase * 20;
+          ctx.beginPath();
+          ctx.arc(sx, sy, rippleRadius, 0, Math.PI * 2);
+          ctx.strokeStyle = `${color}${Math.floor((1 - ripplePhase) * 200)
+            .toString(16)
+            .padStart(2, '0')}`;
+          ctx.lineWidth = 1.5;
+          ctx.stroke();
+        }
 
         // Speaker node
         ctx.beginPath();
         ctx.arc(sx, sy, 11, 0, Math.PI * 2);
-        ctx.fillStyle = '#0f172a';
+        ctx.fillStyle = spk.isActive ? '#0f172a' : '#1e293b';
         ctx.fill();
-        ctx.strokeStyle = color;
+        ctx.strokeStyle = spk.isActive ? color : `${color}88`;
         ctx.lineWidth = 2.5;
         ctx.stroke();
 
         ctx.beginPath();
         ctx.arc(sx, sy, 5, 0, Math.PI * 2);
-        ctx.fillStyle = color;
+        ctx.fillStyle = spk.isActive ? color : `${color}88`;
         ctx.fill();
 
         // Framing Reticle around speaker
         const reticleSize = 18;
-        ctx.strokeStyle = '#f59e0b';
+        ctx.strokeStyle = spk.isActive ? '#f59e0b' : '#94a3b8';
         ctx.lineWidth = 1.5;
         ctx.beginPath();
         ctx.moveTo(sx - reticleSize, sy - reticleSize + 6);
@@ -1028,18 +1030,26 @@ export const SmartRoomDirectorCanvas: React.FC<SmartRoomDirectorCanvasProps> = (
         ctx.stroke();
 
         ctx.font = 'bold 9px Inter, system-ui, sans-serif';
-        ctx.fillStyle = '#fbbf24';
+        ctx.fillStyle = spk.isActive ? '#fbbf24' : '#cbd5e1';
         ctx.textAlign = 'center';
-        ctx.fillText('DIRECTOR FRAMED', sx, sy - reticleSize - 5);
+        ctx.fillText(spk.isActive ? 'DIRECTOR FRAMED' : 'SPEAKER PAUSED', sx, sy - reticleSize - 5);
 
         // Speaker label tag
         ctx.font = 'bold 12px Inter, system-ui, sans-serif';
-        ctx.fillStyle = '#ffffff';
+        ctx.fillStyle = spk.isActive ? '#ffffff' : '#94a3b8';
         ctx.textAlign = 'center';
-        ctx.fillText(spk.slotId === 0 ? 'Speaker 1' : 'Speaker 2', sx, sy + 24);
+        ctx.fillText(
+          spk.slotId === 0
+            ? spk.isActive ? 'Speaker 1' : 'Speaker 1 (Paused)'
+            : spk.isActive ? 'Speaker 2' : 'Speaker 2 (Paused)',
+          sx,
+          sy + 24
+        );
 
         ctx.font = 'bold 10px monospace';
-        ctx.fillStyle = spk.slotId === 0 ? '#34d399' : '#a5b4fc';
+        ctx.fillStyle = spk.isActive
+          ? (spk.slotId === 0 ? '#34d399' : '#a5b4fc')
+          : '#64748b';
         ctx.fillText(`${Math.round(spk.splDb)} dB | ${Math.round(spk.angleDeg)}°`, sx, sy + 36);
       }
 
