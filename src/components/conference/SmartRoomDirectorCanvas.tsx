@@ -28,6 +28,8 @@ import {
   ChevronUp,
   ZoomIn,
   ZoomOut,
+  GripHorizontal,
+  Hand,
 } from 'lucide-react';
 
 interface SmartRoomDirectorCanvasProps {
@@ -120,6 +122,29 @@ export const SmartRoomDirectorCanvas: React.FC<SmartRoomDirectorCanvasProps> = (
   const zoomLevelRef = useRef(zoomLevel);
   zoomLevelRef.current = zoomLevel;
 
+  // Interactive Map Pan State
+  const [panOffset, setPanOffset] = useState<{ x: number; y: number }>({ x: 0, y: 0 });
+  const panOffsetRef = useRef(panOffset);
+  panOffsetRef.current = panOffset;
+  const isPanningMapRef = useRef(false);
+  const panStartMouseRef = useRef({ x: 0, y: 0 });
+  const panStartOffsetRef = useRef({ x: 0, y: 0 });
+
+  // Resizable Canvas Viewport Height State
+  const [canvasHeight, setCanvasHeight] = useState<number>(() => {
+    try {
+      const saved = localStorage.getItem('acoustic_director_canvas_height');
+      if (saved) {
+        const val = Number(saved);
+        if (!isNaN(val) && val >= 320 && val <= 850) return val;
+      }
+    } catch {}
+    return 470;
+  });
+  const isResizingCanvasHeightRef = useRef(false);
+  const resizeStartYRef = useRef(0);
+  const resizeStartHeightRef = useRef(canvasHeight);
+
   const handleZoom = useCallback((delta: number) => {
     setZoomLevel((prev) => {
       const next = Math.max(0.5, Math.min(2.0, Math.round((prev + delta) * 10) / 10));
@@ -132,6 +157,7 @@ export const SmartRoomDirectorCanvas: React.FC<SmartRoomDirectorCanvasProps> = (
 
   const handleResetZoom = useCallback(() => {
     setZoomLevel(1.0);
+    setPanOffset({ x: 0, y: 0 });
     try {
       localStorage.setItem('acoustic_director_canvas_zoom', '1');
     } catch {}
@@ -142,21 +168,61 @@ export const SmartRoomDirectorCanvas: React.FC<SmartRoomDirectorCanvasProps> = (
     const maxDim = Math.max(layout.tableWidthRatio, layout.tableHeightRatio);
     const fitZoom = maxDim > 0.65 ? 0.75 : maxDim > 0.5 ? 0.85 : 1.0;
     setZoomLevel(fitZoom);
+    setPanOffset({ x: 0, y: 0 });
     try {
       localStorage.setItem('acoustic_director_canvas_zoom', String(fitZoom));
     } catch {}
   }, []);
 
-  const handleWheel = useCallback((e: React.WheelEvent<HTMLCanvasElement>) => {
+  const handleHeightResizeStart = useCallback((e: React.MouseEvent) => {
     e.preventDefault();
-    const delta = e.deltaY < 0 ? 0.08 : -0.08;
-    setZoomLevel((prev) => {
-      const next = Math.max(0.5, Math.min(2.0, Math.round((prev + delta) * 100) / 100));
+    e.stopPropagation();
+    isResizingCanvasHeightRef.current = true;
+    resizeStartYRef.current = e.clientY;
+    resizeStartHeightRef.current = canvasHeight;
+
+    const onWindowMouseMove = (moveEvent: MouseEvent) => {
+      if (!isResizingCanvasHeightRef.current) return;
+      const deltaY = moveEvent.clientY - resizeStartYRef.current;
+      const newH = Math.max(320, Math.min(850, Math.round(resizeStartHeightRef.current + deltaY)));
+      setCanvasHeight(newH);
       try {
-        localStorage.setItem('acoustic_director_canvas_zoom', String(next));
+        localStorage.setItem('acoustic_director_canvas_height', String(newH));
       } catch {}
-      return next;
-    });
+    };
+
+    const onWindowMouseUp = () => {
+      isResizingCanvasHeightRef.current = false;
+      window.removeEventListener('mousemove', onWindowMouseMove);
+      window.removeEventListener('mouseup', onWindowMouseUp);
+    };
+
+    window.addEventListener('mousemove', onWindowMouseMove);
+    window.addEventListener('mouseup', onWindowMouseUp);
+  }, [canvasHeight]);
+
+  // Non-passive native wheel event listener to prevent browser page scrolling
+  useEffect(() => {
+    const canvas = canvasRef.current;
+    if (!canvas) return;
+
+    const onWheel = (e: WheelEvent) => {
+      e.preventDefault();
+      e.stopPropagation();
+      const delta = e.deltaY < 0 ? 0.08 : -0.08;
+      setZoomLevel((prev) => {
+        const next = Math.max(0.5, Math.min(2.0, Math.round((prev + delta) * 100) / 100));
+        try {
+          localStorage.setItem('acoustic_director_canvas_zoom', String(next));
+        } catch {}
+        return next;
+      });
+    };
+
+    canvas.addEventListener('wheel', onWheel, { passive: false });
+    return () => {
+      canvas.removeEventListener('wheel', onWheel);
+    };
   }, []);
 
   const showZonesRef = useRef<boolean>(showZones);
@@ -191,12 +257,13 @@ export const SmartRoomDirectorCanvas: React.FC<SmartRoomDirectorCanvasProps> = (
     const mouseX = e.clientX - rect.left;
     const mouseY = e.clientY - rect.top;
 
-    // Inverse Zoom Transformation: convert viewport client mouse pos to room world pos
+    // Inverse Zoom & Pan Transformation: convert viewport client mouse pos to room world pos
     const centerX = rect.width / 2;
     const centerY = rect.height / 2 + 10;
     const zoom = zoomLevelRef.current;
-    const worldX = centerX + (mouseX - centerX) / zoom;
-    const worldY = centerY + (mouseY - centerY) / zoom;
+    const pan = panOffsetRef.current;
+    const worldX = centerX + (mouseX - centerX - pan.x) / zoom;
+    const worldY = centerY + (mouseY - centerY - pan.y) / zoom;
 
     // 1. Check camera drag
     for (const cam of camerasRef.current) {
@@ -237,7 +304,13 @@ export const SmartRoomDirectorCanvas: React.FC<SmartRoomDirectorCanvasProps> = (
 
     if (Math.hypot(worldX - handleX, worldY - handleY) < 20) {
       isResizingTableRef.current = true;
+      return;
     }
+
+    // 4. Start Map Panning when dragging empty floor
+    isPanningMapRef.current = true;
+    panStartMouseRef.current = { x: mouseX, y: mouseY };
+    panStartOffsetRef.current = { ...panOffsetRef.current };
   }, [onUpdateRoomLayout]);
 
   const handleMouseMove = useCallback(
@@ -248,12 +321,24 @@ export const SmartRoomDirectorCanvas: React.FC<SmartRoomDirectorCanvasProps> = (
       const mouseX = e.clientX - rect.left;
       const mouseY = e.clientY - rect.top;
 
-      // Inverse Zoom Transformation: convert viewport client mouse pos to room world pos
+      // Handle map panning
+      if (isPanningMapRef.current) {
+        const dx = mouseX - panStartMouseRef.current.x;
+        const dy = mouseY - panStartMouseRef.current.y;
+        setPanOffset({
+          x: Math.round(panStartOffsetRef.current.x + dx),
+          y: Math.round(panStartOffsetRef.current.y + dy),
+        });
+        return;
+      }
+
+      // Inverse Zoom & Pan Transformation: convert viewport client mouse pos to room world pos
       const centerX = rect.width / 2;
       const centerY = rect.height / 2 + 10;
       const zoom = zoomLevelRef.current;
-      const worldX = centerX + (mouseX - centerX) / zoom;
-      const worldY = centerY + (mouseY - centerY) / zoom;
+      const pan = panOffsetRef.current;
+      const worldX = centerX + (mouseX - centerX - pan.x) / zoom;
+      const worldY = centerY + (mouseY - centerY - pan.y) / zoom;
 
       if (draggingCamIdRef.current) {
         const xRatio = Math.max(0.04, Math.min(0.96, worldX / rect.width));
@@ -340,6 +425,7 @@ export const SmartRoomDirectorCanvas: React.FC<SmartRoomDirectorCanvasProps> = (
     draggingCamIdRef.current = null;
     draggingChairIdRef.current = null;
     isResizingTableRef.current = false;
+    isPanningMapRef.current = false;
   }, []);
 
   useEffect(() => {
@@ -378,33 +464,44 @@ export const SmartRoomDirectorCanvas: React.FC<SmartRoomDirectorCanvasProps> = (
       ctx.fillStyle = '#090d16';
       ctx.fillRect(0, 0, width, height);
 
-      // Apply Center Zoom Transform
+      // Apply Center Zoom & Pan Transform
       ctx.save();
       const zoom = zoomLevelRef.current;
-      ctx.translate(centerX, centerY);
+      const pan = panOffsetRef.current;
+      ctx.translate(centerX + pan.x, centerY + pan.y);
       ctx.scale(zoom, zoom);
       ctx.translate(-centerX, -centerY);
 
-      // Room boundary
-      ctx.strokeStyle = '#1e293b';
-      ctx.lineWidth = 1;
-      ctx.strokeRect(12, 12, width - 24, height - 24);
+      // Compute visible world rectangle so grid and zones extend seamlessly across the viewport
+      const worldLeft = centerX - (centerX + pan.x) / zoom;
+      const worldRight = centerX + (width - centerX - pan.x) / zoom;
+      const worldTop = centerY - (centerY + pan.y) / zoom;
+      const worldBottom = centerY + (height - centerY - pan.y) / zoom;
 
-      // Subtle room grid
-      ctx.strokeStyle = 'rgba(255, 255, 255, 0.03)';
+      // Full visible subtle room grid (aligned to centerX, centerY)
+      ctx.strokeStyle = 'rgba(255, 255, 255, 0.035)';
       ctx.lineWidth = 1;
-      for (let x = 20; x < width - 20; x += 30) {
+      const gridStartX = centerX - Math.ceil((centerX - worldLeft) / 30) * 30;
+      const gridEndX = centerX + Math.ceil((worldRight - centerX) / 30) * 30;
+      for (let x = gridStartX; x <= gridEndX; x += 30) {
         ctx.beginPath();
-        ctx.moveTo(x, 12);
-        ctx.lineTo(x, height - 12);
+        ctx.moveTo(x, worldTop - 50);
+        ctx.lineTo(x, worldBottom + 50);
         ctx.stroke();
       }
-      for (let y = 20; y < height - 20; y += 30) {
+      const gridStartY = centerY - Math.ceil((centerY - worldTop) / 30) * 30;
+      const gridEndY = centerY + Math.ceil((worldBottom - centerY) / 30) * 30;
+      for (let y = gridStartY; y <= gridEndY; y += 30) {
         ctx.beginPath();
-        ctx.moveTo(12, y);
-        ctx.lineTo(width - 12, y);
+        ctx.moveTo(worldLeft - 50, y);
+        ctx.lineTo(worldRight + 50, y);
         ctx.stroke();
       }
+
+      // Room boundary perimeter
+      ctx.strokeStyle = '#1e293b';
+      ctx.lineWidth = 1.5;
+      ctx.strokeRect(12, 12, width - 24, height - 24);
 
       // 2. DRAW CONFERENCE TABLE FIRST (So spatial zones overlay it cleanly)
       const tableX = centerX - tableWidth / 2;
@@ -544,15 +641,12 @@ export const SmartRoomDirectorCanvas: React.FC<SmartRoomDirectorCanvasProps> = (
         drawChair(ctx, cx, cy, chairRadius, chairColor, isHovered, isDragging);
       }
 
-      // 4. DRAW FULL-ROOM INFINITE SPATIAL ZONES OVER TABLE AND FLOOR (Clipped to Room Walls)
+      // 4. DRAW FULL-ROOM INFINITE SPATIAL ZONES OVER TABLE AND FLOOR
       if (showZonesRef.current && zonesRef.current.length > 0) {
-        const fullRoomRadius = Math.hypot(width, height);
-
-        // Clip wedge fills and radial dividing lines to inside the room boundary walls
-        ctx.save();
-        ctx.beginPath();
-        ctx.rect(12, 12, width - 24, height - 24);
-        ctx.clip();
+        const fullRoomRadius = Math.max(
+          Math.hypot(worldRight - centerX, worldBottom - centerY),
+          Math.hypot(worldLeft - centerX, worldTop - centerY)
+        ) * 1.5;
 
         for (const zone of zonesRef.current) {
           const startDeg = zone.min_angle_deg;
@@ -563,7 +657,7 @@ export const SmartRoomDirectorCanvas: React.FC<SmartRoomDirectorCanvasProps> = (
           const startRad = ((startDeg - 90) * Math.PI) / 180;
           const endRad = ((endDeg - 90) * Math.PI) / 180;
 
-          // Semi-transparent sector wedge (Extends across floor and table to room boundary)
+          // Semi-transparent sector wedge (Extends across floor and table seamlessly)
           ctx.beginPath();
           ctx.moveTo(centerX, centerY);
           ctx.arc(centerX, centerY, fullRoomRadius, startRad, endRad);
@@ -571,60 +665,18 @@ export const SmartRoomDirectorCanvas: React.FC<SmartRoomDirectorCanvasProps> = (
           ctx.fillStyle = `${zone.color}15`; // Subtle translucent tint across entire sector
           ctx.fill();
 
-          // High-contrast dividing radial dashed line extending to room boundary
+          // High-contrast dividing radial dashed line extending to viewport boundary
           ctx.beginPath();
           ctx.moveTo(centerX, centerY);
           ctx.lineTo(
             centerX + Math.cos(startRad) * fullRoomRadius,
             centerY + Math.sin(startRad) * fullRoomRadius
           );
-          ctx.strokeStyle = `${zone.color}77`;
+          ctx.strokeStyle = `${zone.color}88`;
           ctx.lineWidth = 1.5;
           ctx.setLineDash([5, 4]);
           ctx.stroke();
           ctx.setLineDash([]);
-        }
-
-        ctx.restore(); // Restore room clipping
-
-        // Draw readable zone name badges along sector bisectors
-        const labelDist = Math.min(width, height) * 0.35;
-        for (const zone of zonesRef.current) {
-          const startDeg = zone.min_angle_deg;
-          let endDeg = zone.max_angle_deg;
-          if (endDeg <= startDeg) {
-            endDeg += 360;
-          }
-          let midAngleDeg = (startDeg + endDeg) / 2;
-          if (midAngleDeg > 180) midAngleDeg -= 360;
-          const midRad = ((midAngleDeg - 90) * Math.PI) / 180;
-          const lx = centerX + Math.cos(midRad) * labelDist;
-          const ly = centerY + Math.sin(midRad) * labelDist;
-
-          const boxW = 104;
-          const boxH = 26;
-          ctx.save();
-          ctx.fillStyle = 'rgba(9, 13, 22, 0.92)';
-          if (ctx.roundRect) {
-            ctx.roundRect(lx - boxW / 2, ly - boxH / 2, boxW, boxH, 6);
-          } else {
-            ctx.rect(lx - boxW / 2, ly - boxH / 2, boxW, boxH);
-          }
-          ctx.fill();
-          ctx.strokeStyle = `${zone.color}99`;
-          ctx.lineWidth = 1.5;
-          ctx.stroke();
-          ctx.restore();
-
-          ctx.font = 'bold 12px Inter, system-ui, sans-serif';
-          ctx.textAlign = 'center';
-          ctx.textBaseline = 'middle';
-          ctx.fillStyle = zone.color;
-          ctx.fillText(zone.name.toUpperCase(), lx, ly - 5);
-
-          ctx.font = 'bold 10px monospace';
-          ctx.fillStyle = '#f1f5f9';
-          ctx.fillText(`${zone.min_angle_deg}°..${zone.max_angle_deg}°`, lx, ly + 6);
         }
       }
 
@@ -867,6 +919,58 @@ export const SmartRoomDirectorCanvas: React.FC<SmartRoomDirectorCanvasProps> = (
         }
       }
 
+      // 8. Draw Readable Zone Name Badges along Sector Bisectors (On top of camera cones for pristine clarity)
+      if (showZonesRef.current && zonesRef.current.length > 0) {
+        const labelDist = Math.min(width, height) * 0.28;
+        for (const zone of zonesRef.current) {
+          const startDeg = zone.min_angle_deg;
+          let endDeg = zone.max_angle_deg;
+          if (endDeg <= startDeg) {
+            endDeg += 360;
+          }
+          let midAngleDeg = (startDeg + endDeg) / 2;
+          if (midAngleDeg > 180) midAngleDeg -= 360;
+          const midRad = ((midAngleDeg - 90) * Math.PI) / 180;
+          const lx = centerX + Math.cos(midRad) * labelDist;
+          const ly = centerY + Math.sin(midRad) * labelDist;
+
+          const boxW = 114;
+          const boxH = 28;
+
+          // CRITICAL: beginPath isolates this badge path from all previous paths!
+          ctx.beginPath();
+          if (ctx.roundRect) {
+            ctx.roundRect(lx - boxW / 2, ly - boxH / 2, boxW, boxH, 6);
+          } else {
+            ctx.rect(lx - boxW / 2, ly - boxH / 2, boxW, boxH);
+          }
+          ctx.fillStyle = 'rgba(9, 13, 22, 0.94)';
+          ctx.fill();
+          ctx.strokeStyle = zone.color;
+          ctx.lineWidth = 1.5;
+          ctx.stroke();
+
+          // Zone color indicator dot
+          ctx.beginPath();
+          ctx.arc(lx - boxW / 2 + 10, ly - 5, 3.5, 0, Math.PI * 2);
+          ctx.fillStyle = zone.color;
+          ctx.fill();
+
+          // Zone Title in crisp white
+          ctx.font = 'bold 11px Inter, system-ui, sans-serif';
+          ctx.textAlign = 'left';
+          ctx.textBaseline = 'middle';
+          ctx.fillStyle = '#f8fafc';
+          ctx.fillText(zone.name.toUpperCase(), lx - boxW / 2 + 18, ly - 5);
+
+          // Angle Bounds in crisp light slate
+          ctx.font = 'bold 10px monospace';
+          ctx.textAlign = 'center';
+          ctx.fillStyle = '#cbd5e1';
+          ctx.fillText(`${zone.min_angle_deg}°..${zone.max_angle_deg}°`, lx, ly + 6);
+        }
+      }
+
       // 9. Render Active Speakers & Framing Reticles
       for (const spk of speakerTargets) {
         const sx = spk.pos.x;
@@ -955,7 +1059,7 @@ export const SmartRoomDirectorCanvas: React.FC<SmartRoomDirectorCanvasProps> = (
     ? 'cursor-grab active:cursor-grabbing'
     : isHoveringResize
     ? 'cursor-nwse-resize'
-    : 'cursor-crosshair';
+    : 'cursor-grab active:cursor-grabbing';
 
   return (
     <div className="flex flex-col bg-slate-900 border border-slate-800 rounded-xl overflow-hidden shadow-2xl">
@@ -969,7 +1073,7 @@ export const SmartRoomDirectorCanvas: React.FC<SmartRoomDirectorCanvasProps> = (
               Director Studio
             </span>
             <span className="px-1.5 py-0.5 rounded-full text-[9px] font-mono font-medium bg-emerald-950/80 text-emerald-300 border border-emerald-800/60">
-              3 NODES
+              {cameras.length} CAMERAS
             </span>
           </div>
 
@@ -1186,14 +1290,13 @@ export const SmartRoomDirectorCanvas: React.FC<SmartRoomDirectorCanvasProps> = (
       )}
 
       {/* Canvas Viewport with Mouse Drag & Resize Handler */}
-      <div className="relative w-full h-[470px]">
+      <div className="relative w-full overflow-hidden" style={{ height: `${canvasHeight}px` }}>
         <canvas
           ref={canvasRef}
           onMouseDown={handleMouseDown}
           onMouseMove={handleMouseMove}
           onMouseUp={handleMouseUp}
           onMouseLeave={handleMouseUp}
-          onWheel={handleWheel}
           className={`w-full h-full block ${cursorClass}`}
         />
         {/* Interactive Hints Overlay */}
@@ -1208,7 +1311,11 @@ export const SmartRoomDirectorCanvas: React.FC<SmartRoomDirectorCanvasProps> = (
           </div>
           <div className="px-2 py-1 rounded bg-slate-950/80 border border-slate-800 text-[10px] text-slate-400 flex items-center space-x-1 backdrop-blur-sm">
             <Maximize2 className="w-3 h-3 text-emerald-400" />
-            <span>Drag handle to resize</span>
+            <span>Drag handle to resize table</span>
+          </div>
+          <div className="px-2 py-1 rounded bg-slate-950/80 border border-slate-800 text-[10px] text-slate-400 flex items-center space-x-1 backdrop-blur-sm">
+            <Hand className="w-3 h-3 text-amber-400" />
+            <span>Drag floor to pan</span>
           </div>
         </div>
 
@@ -1226,7 +1333,7 @@ export const SmartRoomDirectorCanvas: React.FC<SmartRoomDirectorCanvasProps> = (
             type="button"
             onClick={handleResetZoom}
             className="px-1.5 py-0.5 rounded hover:bg-slate-800 text-slate-300 hover:text-white transition text-[11px]"
-            title="Reset Zoom to 100%"
+            title="Reset Zoom to 100% & Center Pan"
           >
             {Math.round(zoomLevel * 100)}%
           </button>
@@ -1243,10 +1350,19 @@ export const SmartRoomDirectorCanvas: React.FC<SmartRoomDirectorCanvasProps> = (
             type="button"
             onClick={handleFitZoom}
             className="px-1.5 py-0.5 rounded hover:bg-slate-800 text-slate-400 hover:text-white transition text-[10px]"
-            title="Fit Room to Viewport (85%)"
+            title="Fit Room to Viewport & Center Pan"
           >
             Fit
           </button>
+        </div>
+
+        {/* Viewport Height Resizer Handle (Bottom-Right) */}
+        <div
+          onMouseDown={handleHeightResizeStart}
+          className="absolute bottom-2 right-2 flex items-center justify-center w-6 h-6 rounded cursor-ns-resize bg-slate-900/90 hover:bg-slate-800 border border-slate-700/80 text-slate-400 hover:text-white shadow transition z-20 group"
+          title="Drag up/down to adjust map height"
+        >
+          <GripHorizontal className="w-3.5 h-3.5 group-hover:scale-110 transition-transform" />
         </div>
       </div>
 
