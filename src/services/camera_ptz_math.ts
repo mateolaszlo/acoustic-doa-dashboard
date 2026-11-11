@@ -108,6 +108,106 @@ export function calculateSpeakerWorldPos(
 }
 
 /**
+ * Computes shape-aware 2D world coordinates for a speaker seated at angleDeg
+ * relative to the conference table geometry and room dimensions.
+ * Resolves the issue where speakers in U-shape, oval, or rectangular tables
+ * were floating inside empty room space.
+ */
+export function calculateTablePerimeterPos(
+  centerX: number,
+  centerY: number,
+  angleDeg: number,
+  layout: RoomLayoutConfig,
+  roomWidth: number,
+  roomHeight: number
+): { x: number; y: number } {
+  const normAngle = wrapAngle180(angleDeg);
+  const rad = (normAngle * Math.PI) / 180.0;
+  const sin = Math.sin(rad);
+  const cos = Math.cos(rad);
+
+  const tableW = roomWidth * layout.tableWidthRatio;
+  const tableH = roomHeight * layout.tableHeightRatio;
+  const halfW = tableW / 2;
+  const halfH = tableH / 2;
+
+  if (layout.tableShape === 'round') {
+    const r = Math.min(halfW, halfH) * 0.95;
+    return {
+      x: centerX + r * sin,
+      y: centerY - r * cos,
+    };
+  }
+
+  if (layout.tableShape === 'oval') {
+    // Elliptical perimeter
+    return {
+      x: centerX + halfW * 0.92 * sin,
+      y: centerY - halfH * 0.92 * cos,
+    };
+  }
+
+  if (layout.tableShape === 'ushape') {
+    const deskThick = Math.max(34, Math.min(tableW * 0.22, tableH * 0.32));
+    const leftDeskCenterX = centerX - halfW + deskThick / 2;
+    const rightDeskCenterX = centerX + halfW - deskThick / 2;
+    const bottomDeskCenterY = centerY + halfH - deskThick / 2;
+
+    // North presenter / podium zone (-40° to +40°)
+    if (Math.abs(normAngle) <= 40) {
+      const podiumDist = Math.max(halfH * 0.95, 60);
+      return {
+        x: centerX + podiumDist * sin * 0.7,
+        y: centerY - podiumDist,
+      };
+    }
+
+    // West wing: Left desk arm (-140° to -40°)
+    if (normAngle > -140 && normAngle < -40) {
+      const t = (normAngle - (-40)) / (-140 - (-40)); // 0 at top, 1 at bottom
+      const y = centerY - halfH + 20 + t * (tableH - 40);
+      return {
+        x: leftDeskCenterX,
+        y,
+      };
+    }
+
+    // East wing: Right desk arm (+40° to +140°)
+    if (normAngle >= 40 && normAngle <= 140) {
+      const t = (normAngle - 40) / (140 - 40); // 0 at top, 1 at bottom
+      const y = centerY - halfH + 20 + t * (tableH - 40);
+      return {
+        x: rightDeskCenterX,
+        y,
+      };
+    }
+
+    // South wing: Bottom desk arm (140° to 180° and -180° to -140°)
+    let t = 0.5;
+    if (normAngle > 0) {
+      t = 0.5 + ((normAngle - 140) / 40) * 0.35;
+    } else {
+      t = 0.15 + ((normAngle - (-180)) / 40) * 0.35;
+    }
+    const x = centerX - halfW + t * tableW;
+    return {
+      x,
+      y: bottomDeskCenterY,
+    };
+  }
+
+  // Default / Hollow Square: project onto rectangular desk perimeter
+  const deskThick = Math.max(30, Math.min(tableW * 0.2, tableH * 0.28));
+  const absSin = Math.abs(sin);
+  const absCos = Math.abs(cos);
+  const scale = Math.min((halfW - deskThick / 2) / (absSin || 0.001), (halfH - deskThick / 2) / (absCos || 0.001));
+  return {
+    x: centerX + sin * scale,
+    y: centerY - cos * scale,
+  };
+}
+
+/**
  * Computes the exact camera bearing angle needed for a camera at (camX, camY)
  * to aim directly at a target at (targetX, targetY).
  *

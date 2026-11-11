@@ -1,19 +1,31 @@
 import React, { useRef, useEffect, useState, useCallback } from 'react';
 import {
+  VirtualCamera,
+  SpatialZone,
   AcousticTrack,
   MeasurementEvent,
-  SpatialZone,
-  VirtualCamera,
   RoomLayoutConfig,
   TableShapeType,
 } from '../../types/api_types';
 import {
-  computeCameraFovPoints,
+  calculateTablePerimeterPos,
   resolveSpatialZone,
-  calculateSpeakerWorldPos,
+  DEFAULT_ROOM_LAYOUT,
 } from '../../services/camera_ptz_math';
 import { ActiveSpeakerTarget } from '../../hooks/useMultiCameraDirector';
-import { Camera, Radio, Eye, EyeOff, Sliders, Layout, Move } from 'lucide-react';
+import {
+  Camera,
+  Radio,
+  Eye,
+  EyeOff,
+  Sliders,
+  Layout,
+  Move,
+  Maximize2,
+  RotateCcw,
+  ChevronDown,
+  ChevronUp,
+} from 'lucide-react';
 
 interface SmartRoomDirectorCanvasProps {
   activeTracks?: AcousticTrack[];
@@ -50,12 +62,15 @@ export const SmartRoomDirectorCanvas: React.FC<SmartRoomDirectorCanvasProps> = (
   const canvasRef = useRef<HTMLCanvasElement | null>(null);
   const lastTimeRef = useRef<number>(performance.now());
   const draggingCamIdRef = useRef<string | null>(null);
+  const isResizingTableRef = useRef<boolean>(false);
 
   // Component UI State
   const [showZones, setShowZones] = useState(true);
   const [cameraStatus, setCameraStatus] = useState<string>('IDLE • MULTI-CAMERA STANDBY');
   const [activeZoneName, setActiveZoneName] = useState<string>('None');
   const [isHoveringCamera, setIsHoveringCamera] = useState(false);
+  const [isHoveringResize, setIsHoveringResize] = useState(false);
+  const [isTableSettingsOpen, setIsTableSettingsOpen] = useState(false);
 
   const showZonesRef = useRef<boolean>(showZones);
   showZonesRef.current = showZones;
@@ -81,7 +96,7 @@ export const SmartRoomDirectorCanvas: React.FC<SmartRoomDirectorCanvasProps> = (
   const onProcessFrameRef = useRef(onProcessFrame);
   onProcessFrameRef.current = onProcessFrame;
 
-  // Mouse interaction handlers for direct camera drag-and-drop
+  // Mouse interaction handlers for direct camera drag-and-drop & table resizing
   const handleMouseDown = useCallback((e: React.MouseEvent<HTMLCanvasElement>) => {
     const canvas = canvasRef.current;
     if (!canvas) return;
@@ -89,6 +104,7 @@ export const SmartRoomDirectorCanvas: React.FC<SmartRoomDirectorCanvasProps> = (
     const mouseX = e.clientX - rect.left;
     const mouseY = e.clientY - rect.top;
 
+    // Check camera drag first
     for (const cam of camerasRef.current) {
       const camX = cam.xRatio * rect.width;
       const camY = cam.yRatio * rect.height;
@@ -97,36 +113,74 @@ export const SmartRoomDirectorCanvas: React.FC<SmartRoomDirectorCanvasProps> = (
         return;
       }
     }
+
+    // Check table resize corner handle
+    const centerX = rect.width / 2;
+    const centerY = rect.height / 2 + 10;
+    const layout = roomLayoutRef.current;
+    const tableW = rect.width * layout.tableWidthRatio;
+    const tableH = rect.height * layout.tableHeightRatio;
+    const handleX = centerX + tableW / 2;
+    const handleY = centerY + tableH / 2;
+
+    if (Math.hypot(mouseX - handleX, mouseY - handleY) < 20) {
+      isResizingTableRef.current = true;
+    }
   }, []);
 
-  const handleMouseMove = useCallback((e: React.MouseEvent<HTMLCanvasElement>) => {
-    const canvas = canvasRef.current;
-    if (!canvas) return;
-    const rect = canvas.getBoundingClientRect();
-    const mouseX = e.clientX - rect.left;
-    const mouseY = e.clientY - rect.top;
+  const handleMouseMove = useCallback(
+    (e: React.MouseEvent<HTMLCanvasElement>) => {
+      const canvas = canvasRef.current;
+      if (!canvas) return;
+      const rect = canvas.getBoundingClientRect();
+      const mouseX = e.clientX - rect.left;
+      const mouseY = e.clientY - rect.top;
 
-    if (draggingCamIdRef.current) {
-      const xRatio = Math.max(0.04, Math.min(0.96, mouseX / rect.width));
-      const yRatio = Math.max(0.04, Math.min(0.96, mouseY / rect.height));
-      onUpdateCamera(draggingCamIdRef.current, { xRatio, yRatio });
-    } else {
-      // Check hover for cursor styling
-      let hovering = false;
-      for (const cam of camerasRef.current) {
-        const camX = cam.xRatio * rect.width;
-        const camY = cam.yRatio * rect.height;
-        if (Math.hypot(mouseX - camX, mouseY - camY) < 20) {
-          hovering = true;
-          break;
+      if (draggingCamIdRef.current) {
+        const xRatio = Math.max(0.04, Math.min(0.96, mouseX / rect.width));
+        const yRatio = Math.max(0.04, Math.min(0.96, mouseY / rect.height));
+        onUpdateCamera(draggingCamIdRef.current, { xRatio, yRatio });
+      } else if (isResizingTableRef.current) {
+        const centerX = rect.width / 2;
+        const centerY = rect.height / 2 + 10;
+        const deltaX = Math.max(40, mouseX - centerX);
+        const deltaY = Math.max(30, mouseY - centerY);
+        const tableWidthRatio = Math.max(0.30, Math.min(0.82, (deltaX * 2) / rect.width));
+        const tableHeightRatio = Math.max(0.20, Math.min(0.60, (deltaY * 2) / rect.height));
+        onUpdateRoomLayout({
+          tableWidthRatio: Math.round(tableWidthRatio * 100) / 100,
+          tableHeightRatio: Math.round(tableHeightRatio * 100) / 100,
+        });
+      } else {
+        // Hover detection for cameras
+        let hoveringCam = false;
+        for (const cam of camerasRef.current) {
+          const camX = cam.xRatio * rect.width;
+          const camY = cam.yRatio * rect.height;
+          if (Math.hypot(mouseX - camX, mouseY - camY) < 20) {
+            hoveringCam = true;
+            break;
+          }
         }
+        setIsHoveringCamera(hoveringCam);
+
+        // Hover detection for table resize handle
+        const centerX = rect.width / 2;
+        const centerY = rect.height / 2 + 10;
+        const layout = roomLayoutRef.current;
+        const tableW = rect.width * layout.tableWidthRatio;
+        const tableH = rect.height * layout.tableHeightRatio;
+        const handleX = centerX + tableW / 2;
+        const handleY = centerY + tableH / 2;
+        setIsHoveringResize(Math.hypot(mouseX - handleX, mouseY - handleY) < 18);
       }
-      setIsHoveringCamera(hovering);
-    }
-  }, [onUpdateCamera]);
+    },
+    [onUpdateCamera, onUpdateRoomLayout]
+  );
 
   const handleMouseUp = useCallback(() => {
     draggingCamIdRef.current = null;
+    isResizingTableRef.current = false;
   }, []);
 
   useEffect(() => {
@@ -160,7 +214,6 @@ export const SmartRoomDirectorCanvas: React.FC<SmartRoomDirectorCanvasProps> = (
       const layout = roomLayoutRef.current;
       const tableWidth = width * layout.tableWidthRatio;
       const tableHeight = height * layout.tableHeightRatio;
-      const tableRadiusPx = Math.min(tableWidth, tableHeight) * 0.48;
 
       // 1. Draw Conference Room Floor & Grid
       ctx.fillStyle = '#090d16';
@@ -187,69 +240,12 @@ export const SmartRoomDirectorCanvas: React.FC<SmartRoomDirectorCanvasProps> = (
         ctx.stroke();
       }
 
-      // 2. Draw Geofenced Spatial Zones (Positioned cleanly away from wall cameras)
-      if (showZonesRef.current && zonesRef.current.length > 0) {
-        const zoneRadius = Math.min(width, height) * 0.42;
-        for (const zone of zonesRef.current) {
-          const startRad = ((zone.min_angle_deg - 90) * Math.PI) / 180;
-          const endRad = ((zone.max_angle_deg - 90) * Math.PI) / 180;
-
-          // Sector wedge
-          ctx.beginPath();
-          ctx.moveTo(centerX, centerY);
-          ctx.arc(centerX, centerY, zoneRadius, startRad, endRad);
-          ctx.closePath();
-          ctx.fillStyle = `${zone.color}12`;
-          ctx.fill();
-
-          // Sector boundary arc
-          ctx.beginPath();
-          ctx.arc(centerX, centerY, zoneRadius, startRad, endRad);
-          ctx.strokeStyle = `${zone.color}66`;
-          ctx.lineWidth = 1.5;
-          ctx.setLineDash([4, 4]);
-          ctx.stroke();
-          ctx.setLineDash([]);
-
-          // Radial sector boundary lines
-          ctx.beginPath();
-          ctx.moveTo(centerX, centerY);
-          ctx.lineTo(centerX + Math.cos(startRad) * zoneRadius, centerY + Math.sin(startRad) * zoneRadius);
-          ctx.moveTo(centerX, centerY);
-          ctx.lineTo(centerX + Math.cos(endRad) * zoneRadius, centerY + Math.sin(endRad) * zoneRadius);
-          ctx.strokeStyle = `${zone.color}33`;
-          ctx.lineWidth = 1;
-          ctx.stroke();
-
-          // Zone text label (Offset radially to avoid colliding with top/bottom wall cameras)
-          const midAngleDeg = (zone.min_angle_deg + zone.max_angle_deg) / 2;
-          const midRad = ((midAngleDeg - 90) * Math.PI) / 180;
-          const labelDist = zoneRadius * 0.68;
-          const lx = centerX + Math.cos(midRad) * labelDist;
-          const ly = centerY + Math.sin(midRad) * labelDist;
-
-          ctx.save();
-          ctx.fillStyle = 'rgba(9, 13, 22, 0.75)';
-          ctx.fillRect(lx - 45, ly - 10, 90, 20);
-          ctx.restore();
-
-          ctx.font = '10px Inter, system-ui, sans-serif';
-          ctx.textAlign = 'center';
-          ctx.textBaseline = 'middle';
-          ctx.fillStyle = zone.color;
-          ctx.fillText(zone.name.toUpperCase(), lx, ly - 3);
-
-          ctx.font = '8px monospace';
-          ctx.fillStyle = 'rgba(255, 255, 255, 0.45)';
-          ctx.fillText(`${zone.min_angle_deg}°..${zone.max_angle_deg}°`, lx, ly + 8);
-        }
-      }
-
-      // 3. Draw Conference Table based on Selected Table Shape
+      // 2. DRAW CONFERENCE TABLE FIRST (So spatial zones overlay it cleanly)
       const tableX = centerX - tableWidth / 2;
       const tableY = centerY - tableHeight / 2;
       const chairColor = '#475569';
       const chairRadius = 4.5;
+      const totalSeats = layout.seatCount || 8;
 
       ctx.shadowColor = 'rgba(0, 0, 0, 0.6)';
       ctx.shadowBlur = 16;
@@ -258,7 +254,11 @@ export const SmartRoomDirectorCanvas: React.FC<SmartRoomDirectorCanvasProps> = (
       if (layout.tableShape === 'oval') {
         // Boardroom Oval Table
         ctx.beginPath();
-        ctx.roundRect(tableX, tableY, tableWidth, tableHeight, 26);
+        if (ctx.roundRect) {
+          ctx.roundRect(tableX, tableY, tableWidth, tableHeight, 26);
+        } else {
+          ctx.rect(tableX, tableY, tableWidth, tableHeight);
+        }
         ctx.fillStyle = '#1e293b';
         ctx.fill();
         ctx.shadowBlur = 0;
@@ -268,14 +268,17 @@ export const SmartRoomDirectorCanvas: React.FC<SmartRoomDirectorCanvasProps> = (
         ctx.stroke();
 
         // Seating chairs around oval
-        const xOffsets = [-tableWidth * 0.32, 0, tableWidth * 0.32];
-        for (const off of xOffsets) {
+        const perSideSeats = Math.max(2, Math.floor((totalSeats - 2) / 2));
+        for (let i = 0; i < perSideSeats; i++) {
+          const t = perSideSeats > 1 ? i / (perSideSeats - 1) : 0.5;
+          const cx = tableX + 32 + t * (tableWidth - 64);
           ctx.beginPath();
-          ctx.arc(centerX + off, tableY - 11, chairRadius, 0, Math.PI * 2);
-          ctx.arc(centerX + off, tableY + tableHeight + 11, chairRadius, 0, Math.PI * 2);
+          ctx.arc(cx, tableY - 11, chairRadius, 0, Math.PI * 2);
+          ctx.arc(cx, tableY + tableHeight + 11, chairRadius, 0, Math.PI * 2);
           ctx.fillStyle = chairColor;
           ctx.fill();
         }
+        // Head chairs
         ctx.beginPath();
         ctx.arc(tableX - 11, centerY, chairRadius, 0, Math.PI * 2);
         ctx.arc(tableX + tableWidth + 11, centerY, chairRadius, 0, Math.PI * 2);
@@ -295,27 +298,66 @@ export const SmartRoomDirectorCanvas: React.FC<SmartRoomDirectorCanvasProps> = (
         ctx.stroke();
 
         // Radial chairs around circle
-        const seats = layout.seatCount || 8;
-        for (let i = 0; i < seats; i++) {
-          const ang = (i / seats) * Math.PI * 2 - Math.PI / 2;
+        for (let i = 0; i < totalSeats; i++) {
+          const ang = (i / totalSeats) * Math.PI * 2 - Math.PI / 2;
           ctx.beginPath();
-          ctx.arc(centerX + Math.cos(ang) * (r + 12), centerY + Math.sin(ang) * (r + 12), chairRadius, 0, Math.PI * 2);
+          ctx.arc(
+            centerX + Math.cos(ang) * (r + 12),
+            centerY + Math.sin(ang) * (r + 12),
+            chairRadius,
+            0,
+            Math.PI * 2
+          );
           ctx.fillStyle = chairColor;
           ctx.fill();
         }
       } else if (layout.tableShape === 'ushape') {
-        // U-Shape Auditorium Table (Open North towards Stage)
-        const wallThick = 26;
+        // U-Shape Auditorium Table (Open North towards Stage/Screen)
+        const wallThick = Math.max(34, Math.min(tableWidth * 0.22, tableHeight * 0.32));
+        const outerR = 14;
+        const innerR = 8;
+
+        ctx.save();
         ctx.beginPath();
         ctx.moveTo(tableX, tableY);
-        ctx.lineTo(tableX + wallThick, tableY);
-        ctx.lineTo(tableX + wallThick, tableY + tableHeight - wallThick);
-        ctx.lineTo(tableX + tableWidth - wallThick, tableY + tableHeight - wallThick);
-        ctx.lineTo(tableX + tableWidth - wallThick, tableY);
+        // Left outer edge down to bottom-left
+        ctx.lineTo(tableX, tableY + tableHeight - outerR);
+        ctx.arcTo(tableX, tableY + tableHeight, tableX + outerR, tableY + tableHeight, outerR);
+        // Bottom outer edge to bottom-right
+        ctx.lineTo(tableX + tableWidth - outerR, tableY + tableHeight);
+        ctx.arcTo(
+          tableX + tableWidth,
+          tableY + tableHeight,
+          tableX + tableWidth,
+          tableY + tableHeight - outerR,
+          outerR
+        );
+        // Right outer edge up to top-right
         ctx.lineTo(tableX + tableWidth, tableY);
-        ctx.lineTo(tableX + tableWidth, tableY + tableHeight);
-        ctx.lineTo(tableX, tableY + tableHeight);
+        // Right top inner cap
+        ctx.lineTo(tableX + tableWidth - wallThick, tableY);
+        // Right inner edge down to inner corner
+        ctx.lineTo(tableX + tableWidth - wallThick, tableY + tableHeight - wallThick + innerR);
+        ctx.arcTo(
+          tableX + tableWidth - wallThick,
+          tableY + tableHeight - wallThick,
+          tableX + tableWidth - wallThick - innerR,
+          tableY + tableHeight - wallThick,
+          innerR
+        );
+        // Bottom inner edge to inner left corner
+        ctx.lineTo(tableX + wallThick + innerR, tableY + tableHeight - wallThick);
+        ctx.arcTo(
+          tableX + wallThick,
+          tableY + tableHeight - wallThick,
+          tableX + wallThick,
+          tableY + tableHeight - wallThick - innerR,
+          innerR
+        );
+        // Left inner edge up to top-left
+        ctx.lineTo(tableX + wallThick, tableY);
         ctx.closePath();
+
         ctx.fillStyle = '#1e293b';
         ctx.fill();
         ctx.shadowBlur = 0;
@@ -323,22 +365,47 @@ export const SmartRoomDirectorCanvas: React.FC<SmartRoomDirectorCanvasProps> = (
         ctx.strokeStyle = '#334155';
         ctx.lineWidth = 2;
         ctx.stroke();
+        ctx.restore();
 
-        // Chairs on outer boundary
-        ctx.beginPath();
-        ctx.arc(tableX - 11, centerY - 20, chairRadius, 0, Math.PI * 2);
-        ctx.arc(tableX - 11, centerY + 20, chairRadius, 0, Math.PI * 2);
-        ctx.arc(tableX + tableWidth + 11, centerY - 20, chairRadius, 0, Math.PI * 2);
-        ctx.arc(tableX + tableWidth + 11, centerY + 20, chairRadius, 0, Math.PI * 2);
-        ctx.arc(centerX - 35, tableY + tableHeight + 11, chairRadius, 0, Math.PI * 2);
-        ctx.arc(centerX + 35, tableY + tableHeight + 11, chairRadius, 0, Math.PI * 2);
-        ctx.fillStyle = chairColor;
-        ctx.fill();
+        // Seating chairs distributed dynamically along outer wings
+        const sideSeats = Math.max(2, Math.floor(totalSeats * 0.35));
+        const bottomSeats = Math.max(2, totalSeats - sideSeats * 2);
+
+        // Left wing chairs (outer)
+        for (let i = 0; i < sideSeats; i++) {
+          const cy = tableY + 24 + (i / Math.max(1, sideSeats - 1)) * (tableHeight - 48);
+          ctx.beginPath();
+          ctx.arc(tableX - 12, cy, chairRadius, 0, Math.PI * 2);
+          ctx.fillStyle = chairColor;
+          ctx.fill();
+        }
+
+        // Right wing chairs (outer)
+        for (let i = 0; i < sideSeats; i++) {
+          const cy = tableY + 24 + (i / Math.max(1, sideSeats - 1)) * (tableHeight - 48);
+          ctx.beginPath();
+          ctx.arc(tableX + tableWidth + 12, cy, chairRadius, 0, Math.PI * 2);
+          ctx.fillStyle = chairColor;
+          ctx.fill();
+        }
+
+        // Bottom wing chairs (outer)
+        for (let i = 0; i < bottomSeats; i++) {
+          const cx = tableX + 32 + (i / Math.max(1, bottomSeats - 1)) * (tableWidth - 64);
+          ctx.beginPath();
+          ctx.arc(cx, tableY + tableHeight + 12, chairRadius, 0, Math.PI * 2);
+          ctx.fillStyle = chairColor;
+          ctx.fill();
+        }
       } else {
-        // Hollow Square
-        const wallThick = 24;
+        // Hollow Square Executive Table
+        const wallThick = Math.max(28, Math.min(tableWidth * 0.2, tableHeight * 0.28));
         ctx.beginPath();
-        ctx.rect(tableX, tableY, tableWidth, tableHeight);
+        if (ctx.roundRect) {
+          ctx.roundRect(tableX, tableY, tableWidth, tableHeight, 8);
+        } else {
+          ctx.rect(tableX, tableY, tableWidth, tableHeight);
+        }
         ctx.fillStyle = '#1e293b';
         ctx.fill();
         ctx.shadowBlur = 0;
@@ -348,8 +415,100 @@ export const SmartRoomDirectorCanvas: React.FC<SmartRoomDirectorCanvasProps> = (
         ctx.stroke();
 
         ctx.fillStyle = '#090d16';
-        ctx.fillRect(tableX + wallThick, tableY + wallThick, tableWidth - wallThick * 2, tableHeight - wallThick * 2);
-        ctx.strokeRect(tableX + wallThick, tableY + wallThick, tableWidth - wallThick * 2, tableHeight - wallThick * 2);
+        ctx.fillRect(
+          tableX + wallThick,
+          tableY + wallThick,
+          tableWidth - wallThick * 2,
+          tableHeight - wallThick * 2
+        );
+        ctx.strokeRect(
+          tableX + wallThick,
+          tableY + wallThick,
+          tableWidth - wallThick * 2,
+          tableHeight - wallThick * 2
+        );
+
+        // Seating chairs distributed around 4 sides
+        const perSide = Math.max(1, Math.floor(totalSeats / 4));
+        for (let i = 0; i < perSide; i++) {
+          const t = perSide > 1 ? i / (perSide - 1) : 0.5;
+          const cx = tableX + 28 + t * (tableWidth - 56);
+          const cy = tableY + 28 + t * (tableHeight - 56);
+          ctx.beginPath();
+          ctx.arc(cx, tableY - 11, chairRadius, 0, Math.PI * 2);
+          ctx.arc(cx, tableY + tableHeight + 11, chairRadius, 0, Math.PI * 2);
+          ctx.arc(tableX - 11, cy, chairRadius, 0, Math.PI * 2);
+          ctx.arc(tableX + tableWidth + 11, cy, chairRadius, 0, Math.PI * 2);
+          ctx.fillStyle = chairColor;
+          ctx.fill();
+        }
+      }
+
+      // 3. DRAW GEOFENCED SPATIAL ZONES OVER THE TABLE
+      if (showZonesRef.current && zonesRef.current.length > 0) {
+        const zoneRadius = Math.min(width, height) * 0.44;
+        for (const zone of zonesRef.current) {
+          const startRad = ((zone.min_angle_deg - 90) * Math.PI) / 180;
+          const endRad = ((zone.max_angle_deg - 90) * Math.PI) / 180;
+
+          // Semi-transparent sector wedge (Overlays table and floor)
+          ctx.beginPath();
+          ctx.moveTo(centerX, centerY);
+          ctx.arc(centerX, centerY, zoneRadius, startRad, endRad);
+          ctx.closePath();
+          ctx.fillStyle = `${zone.color}20`; // Tinted overlay
+          ctx.fill();
+
+          // High-contrast sector boundary arc
+          ctx.beginPath();
+          ctx.arc(centerX, centerY, zoneRadius, startRad, endRad);
+          ctx.strokeStyle = `${zone.color}99`;
+          ctx.lineWidth = 1.5;
+          ctx.setLineDash([4, 4]);
+          ctx.stroke();
+          ctx.setLineDash([]);
+
+          // Radial sector boundary lines
+          ctx.beginPath();
+          ctx.moveTo(centerX, centerY);
+          ctx.lineTo(
+            centerX + Math.cos(startRad) * zoneRadius,
+            centerY + Math.sin(startRad) * zoneRadius
+          );
+          ctx.moveTo(centerX, centerY);
+          ctx.lineTo(
+            centerX + Math.cos(endRad) * zoneRadius,
+            centerY + Math.sin(endRad) * zoneRadius
+          );
+          ctx.strokeStyle = `${zone.color}55`;
+          ctx.lineWidth = 1;
+          ctx.stroke();
+
+          // Zone text label (Offset radially to avoid camera collisions)
+          const midAngleDeg = (zone.min_angle_deg + zone.max_angle_deg) / 2;
+          const midRad = ((midAngleDeg - 90) * Math.PI) / 180;
+          const labelDist = zoneRadius * 0.72;
+          const lx = centerX + Math.cos(midRad) * labelDist;
+          const ly = centerY + Math.sin(midRad) * labelDist;
+
+          ctx.save();
+          ctx.fillStyle = 'rgba(9, 13, 22, 0.88)';
+          ctx.fillRect(lx - 45, ly - 10, 90, 20);
+          ctx.strokeStyle = `${zone.color}66`;
+          ctx.lineWidth = 1;
+          ctx.strokeRect(lx - 45, ly - 10, 90, 20);
+          ctx.restore();
+
+          ctx.font = '10px Inter, system-ui, sans-serif';
+          ctx.textAlign = 'center';
+          ctx.textBaseline = 'middle';
+          ctx.fillStyle = zone.color;
+          ctx.fillText(zone.name.toUpperCase(), lx, ly - 3);
+
+          ctx.font = '8px monospace';
+          ctx.fillStyle = 'rgba(255, 255, 255, 0.65)';
+          ctx.fillText(`${zone.min_angle_deg}°..${zone.max_angle_deg}°`, lx, ly + 8);
+        }
       }
 
       // 4. Draw ESP32 Planar Mic Array Pod at Table Center
@@ -384,7 +543,27 @@ export const SmartRoomDirectorCanvas: React.FC<SmartRoomDirectorCanvasProps> = (
       ctx.textAlign = 'center';
       ctx.fillText('DOA ARRAY', centerX, centerY + 22);
 
-      // 5. Build Active Speaker Targets for Broadcast Director
+      // 5. Interactive Table Resize Corner Handle
+      const handleX = tableX + tableWidth;
+      const handleY = tableY + tableHeight;
+      ctx.beginPath();
+      ctx.arc(handleX, handleY, 8, 0, Math.PI * 2);
+      ctx.fillStyle = isResizingTableRef.current ? '#10b981' : '#334155';
+      ctx.fill();
+      ctx.strokeStyle = '#64748b';
+      ctx.lineWidth = 1.5;
+      ctx.stroke();
+
+      // Handle grip icon
+      ctx.fillStyle = '#ffffff';
+      ctx.beginPath();
+      ctx.arc(handleX - 2, handleY - 2, 1.2, 0, Math.PI * 2);
+      ctx.arc(handleX + 2, handleY - 2, 1.2, 0, Math.PI * 2);
+      ctx.arc(handleX - 2, handleY + 2, 1.2, 0, Math.PI * 2);
+      ctx.arc(handleX + 2, handleY + 2, 1.2, 0, Math.PI * 2);
+      ctx.fill();
+
+      // 6. Build Active Speaker Targets for Broadcast Director (Shape-Aware Positions)
       const tracks = activeTracksRef.current;
       const speakerTargets: ActiveSpeakerTarget[] = [];
 
@@ -394,7 +573,7 @@ export const SmartRoomDirectorCanvas: React.FC<SmartRoomDirectorCanvasProps> = (
       let resolvedZone = 'Unassigned';
 
       if (track0) {
-        const pos0 = calculateSpeakerWorldPos(centerX, centerY, track0.angleDeg, tableRadiusPx);
+        const pos0 = calculateTablePerimeterPos(centerX, centerY, track0.angleDeg, layout, width, height);
         speakerTargets.push({
           slotId: 0,
           pos: pos0,
@@ -407,7 +586,7 @@ export const SmartRoomDirectorCanvas: React.FC<SmartRoomDirectorCanvasProps> = (
       }
 
       if (track1) {
-        const pos1 = calculateSpeakerWorldPos(centerX, centerY, track1.angleDeg, tableRadiusPx);
+        const pos1 = calculateTablePerimeterPos(centerX, centerY, track1.angleDeg, layout, width, height);
         speakerTargets.push({
           slotId: 1,
           pos: pos1,
@@ -424,7 +603,7 @@ export const SmartRoomDirectorCanvas: React.FC<SmartRoomDirectorCanvasProps> = (
         const latest = latestEventsRef.current[latestEventsRef.current.length - 1];
         if (Date.now() - latest.timestampMs < 1600 && latest.soundLevelDb >= 50) {
           const slot = latest.slotId ?? 0;
-          const pos = calculateSpeakerWorldPos(centerX, centerY, latest.angleDeg, tableRadiusPx);
+          const pos = calculateTablePerimeterPos(centerX, centerY, latest.angleDeg, layout, width, height);
           speakerTargets.push({
             slotId: slot,
             pos,
@@ -439,7 +618,7 @@ export const SmartRoomDirectorCanvas: React.FC<SmartRoomDirectorCanvasProps> = (
 
       setActiveZoneName(resolvedZone);
 
-      // 6. Process Multi-Camera Broadcast Assignment & Sticky Memory
+      // 7. Process Multi-Camera Broadcast Assignment & Sticky Memory
       const { activeCamera } = onProcessFrameRef.current(speakerTargets, width, height, dt);
 
       if (activeCamera && speakerTargets.some((s) => s.isActive)) {
@@ -451,7 +630,7 @@ export const SmartRoomDirectorCanvas: React.FC<SmartRoomDirectorCanvasProps> = (
         setCameraStatus('IDLE • MULTI-CAMERA STANDBY');
       }
 
-      // 7. Render All Virtual Cameras (Frustums, Cones, Tally Lights)
+      // 8. Render All Virtual Cameras (Frustums, Cones, Tally Lights)
       const currentCams = camerasRef.current;
       for (const cam of currentCams) {
         const camX = cam.xRatio * width;
@@ -468,7 +647,6 @@ export const SmartRoomDirectorCanvas: React.FC<SmartRoomDirectorCanvasProps> = (
           coneGrad.addColorStop(0.5, `${cam.color}20`);
           coneGrad.addColorStop(1, 'rgba(0, 0, 0, 0.0)');
         } else {
-          // Standby camera: faint context cone
           coneGrad.addColorStop(0, 'rgba(148, 163, 184, 0.07)');
           coneGrad.addColorStop(1, 'rgba(0, 0, 0, 0.0)');
         }
@@ -494,7 +672,10 @@ export const SmartRoomDirectorCanvas: React.FC<SmartRoomDirectorCanvasProps> = (
         const panRad = ((cam.currentPanDeg - 90) * Math.PI) / 180;
         ctx.beginPath();
         ctx.moveTo(camX, camY);
-        ctx.lineTo(camX + Math.cos(panRad) * coneRadius * 0.9, camY + Math.sin(panRad) * coneRadius * 0.9);
+        ctx.lineTo(
+          camX + Math.cos(panRad) * coneRadius * 0.9,
+          camY + Math.sin(panRad) * coneRadius * 0.9
+        );
         ctx.strokeStyle = isLive ? cam.color : 'rgba(148, 163, 184, 0.3)';
         ctx.lineWidth = isLive ? 1.5 : 0.8;
         ctx.stroke();
@@ -529,7 +710,11 @@ export const SmartRoomDirectorCanvas: React.FC<SmartRoomDirectorCanvasProps> = (
         ctx.font = '8px Inter, sans-serif';
         const textWidth = ctx.measureText(pillText).width;
         ctx.fillStyle = isLive ? 'rgba(16, 185, 129, 0.85)' : 'rgba(15, 23, 42, 0.85)';
-        ctx.roundRect(camX - textWidth / 2 - 4, labelY - 8, textWidth + 8, 13, 4);
+        if (ctx.roundRect) {
+          ctx.roundRect(camX - textWidth / 2 - 4, labelY - 8, textWidth + 8, 13, 4);
+        } else {
+          ctx.rect(camX - textWidth / 2 - 4, labelY - 8, textWidth + 8, 13);
+        }
         ctx.fill();
 
         ctx.fillStyle = isLive ? '#022c22' : '#94a3b8';
@@ -542,13 +727,15 @@ export const SmartRoomDirectorCanvas: React.FC<SmartRoomDirectorCanvasProps> = (
           const tallyPhase = (time % 1000) / 1000;
           ctx.beginPath();
           ctx.arc(camX, camY, 17 + tallyPhase * 6, 0, Math.PI * 2);
-          ctx.strokeStyle = `${cam.color}${Math.floor((1 - tallyPhase) * 180).toString(16).padStart(2, '0')}`;
+          ctx.strokeStyle = `${cam.color}${Math.floor((1 - tallyPhase) * 180)
+            .toString(16)
+            .padStart(2, '0')}`;
           ctx.lineWidth = 1.5;
           ctx.stroke();
         }
       }
 
-      // 8. Render Active Speakers & Framing Reticles
+      // 9. Render Active Speakers & Framing Reticles
       for (const spk of speakerTargets) {
         const sx = spk.pos.x;
         const sy = spk.pos.y;
@@ -559,7 +746,9 @@ export const SmartRoomDirectorCanvas: React.FC<SmartRoomDirectorCanvasProps> = (
         const rippleRadius = 14 + ripplePhase * 20;
         ctx.beginPath();
         ctx.arc(sx, sy, rippleRadius, 0, Math.PI * 2);
-        ctx.strokeStyle = `${color}${Math.floor((1 - ripplePhase) * 200).toString(16).padStart(2, '0')}`;
+        ctx.strokeStyle = `${color}${Math.floor((1 - ripplePhase) * 200)
+          .toString(16)
+          .padStart(2, '0')}`;
         ctx.lineWidth = 1.5;
         ctx.stroke();
 
@@ -623,13 +812,27 @@ export const SmartRoomDirectorCanvas: React.FC<SmartRoomDirectorCanvasProps> = (
     };
   }, []);
 
+  const shapeOptions: { id: TableShapeType; label: string }[] = [
+    { id: 'oval', label: 'Oval' },
+    { id: 'round', label: 'Round' },
+    { id: 'ushape', label: 'U-Shape' },
+    { id: 'hollow_square', label: 'Square' },
+  ];
+
+  const cursorClass = isHoveringCamera
+    ? 'cursor-grab active:cursor-grabbing'
+    : isHoveringResize
+    ? 'cursor-nwse-resize'
+    : 'cursor-crosshair';
+
   return (
-    <div className="relative flex flex-col bg-slate-900 border border-slate-800 rounded-xl overflow-hidden shadow-2xl">
-      {/* Top Canvas Header & Telemetry Bar */}
-      <div className="flex flex-wrap items-center justify-between px-4 py-3 bg-slate-950 border-b border-slate-800 text-xs gap-2">
+    <div className="flex flex-col bg-slate-900 border border-slate-800 rounded-xl overflow-hidden shadow-2xl">
+      {/* Canvas Top Bar Controls & Telemetry */}
+      <div className="flex flex-wrap items-center justify-between px-4 py-2.5 bg-slate-950 border-b border-slate-800 gap-2">
+        {/* Title & Studio Status */}
         <div className="flex items-center space-x-2">
           <Camera className="w-4 h-4 text-emerald-400 animate-pulse" />
-          <span className="font-semibold text-slate-200 uppercase tracking-wider">
+          <span className="font-semibold text-slate-200 uppercase tracking-wider text-xs">
             Smart Multi-Camera Director
           </span>
           <span className="px-2 py-0.5 rounded-full text-[10px] font-mono font-medium bg-emerald-950/80 text-emerald-300 border border-emerald-800/60">
@@ -638,7 +841,7 @@ export const SmartRoomDirectorCanvas: React.FC<SmartRoomDirectorCanvasProps> = (
         </div>
 
         {/* Real-time Camera Telemetry Pill */}
-        <div className="flex items-center space-x-2 font-mono text-slate-400">
+        <div className="flex items-center space-x-2 font-mono text-slate-400 text-xs">
           <Radio className="w-3.5 h-3.5 text-cyan-400" />
           <span className="text-slate-300 font-medium">{cameraStatus}</span>
         </div>
@@ -651,20 +854,41 @@ export const SmartRoomDirectorCanvas: React.FC<SmartRoomDirectorCanvasProps> = (
               <Layout className="w-3 h-3" />
               <span className="hidden sm:inline">Table:</span>
             </span>
-            {(['oval', 'round', 'ushape'] as TableShapeType[]).map((shape) => (
+            {shapeOptions.map((opt) => (
               <button
-                key={shape}
-                onClick={() => onUpdateRoomLayout({ tableShape: shape })}
+                key={opt.id}
+                onClick={() => onUpdateRoomLayout({ tableShape: opt.id })}
                 className={`px-2 py-1 rounded font-medium capitalize transition ${
-                  roomLayout.tableShape === shape
+                  roomLayout.tableShape === opt.id
                     ? 'bg-emerald-600 text-slate-950 font-bold shadow'
                     : 'text-slate-400 hover:text-slate-200'
                 }`}
               >
-                {shape === 'ushape' ? 'U-Shape' : shape}
+                {opt.label}
               </button>
             ))}
           </div>
+
+          {/* Table Dimensions & Layout Settings Popover Trigger */}
+          <button
+            onClick={() => setIsTableSettingsOpen(!isTableSettingsOpen)}
+            className={`px-2 py-1 rounded text-[11px] font-medium flex items-center space-x-1 border transition ${
+              isTableSettingsOpen
+                ? 'bg-slate-800 text-emerald-400 border-slate-700'
+                : 'bg-slate-900 text-slate-300 border-slate-800 hover:border-slate-700'
+            }`}
+            title="Adjust table dimensions and seating layout"
+          >
+            <Maximize2 className="w-3 h-3 text-cyan-400" />
+            <span className="font-mono text-[10px]">
+              {Math.round(roomLayout.tableWidthRatio * 100)}%×{Math.round(roomLayout.tableHeightRatio * 100)}%
+            </span>
+            {isTableSettingsOpen ? (
+              <ChevronUp className="w-3 h-3" />
+            ) : (
+              <ChevronDown className="w-3 h-3" />
+            )}
+          </button>
 
           {/* Zones Toggle */}
           <button
@@ -692,7 +916,120 @@ export const SmartRoomDirectorCanvas: React.FC<SmartRoomDirectorCanvasProps> = (
         </div>
       </div>
 
-      {/* Canvas Viewport with Mouse Drag Handler */}
+      {/* Expandable Table Dimensions Settings Card */}
+      {isTableSettingsOpen && (
+        <div className="bg-slate-950 border-b border-slate-800 px-5 py-3 text-xs grid grid-cols-1 sm:grid-cols-4 gap-4 items-center">
+          {/* Width Slider */}
+          <div className="space-y-1">
+            <div className="flex justify-between text-slate-400 text-[11px]">
+              <span>Table Width:</span>
+              <span className="font-mono text-emerald-400 font-bold">
+                {Math.round(roomLayout.tableWidthRatio * 100)}%
+              </span>
+            </div>
+            <input
+              type="range"
+              min={30}
+              max={80}
+              step={2}
+              value={Math.round(roomLayout.tableWidthRatio * 100)}
+              onChange={(e) =>
+                onUpdateRoomLayout({ tableWidthRatio: Number(e.target.value) / 100 })
+              }
+              className="w-full accent-emerald-500 cursor-pointer"
+            />
+          </div>
+
+          {/* Height Slider */}
+          <div className="space-y-1">
+            <div className="flex justify-between text-slate-400 text-[11px]">
+              <span>Table Height:</span>
+              <span className="font-mono text-cyan-400 font-bold">
+                {Math.round(roomLayout.tableHeightRatio * 100)}%
+              </span>
+            </div>
+            <input
+              type="range"
+              min={20}
+              max={60}
+              step={2}
+              value={Math.round(roomLayout.tableHeightRatio * 100)}
+              onChange={(e) =>
+                onUpdateRoomLayout({ tableHeightRatio: Number(e.target.value) / 100 })
+              }
+              className="w-full accent-cyan-500 cursor-pointer"
+            />
+          </div>
+
+          {/* Seat Count Slider */}
+          <div className="space-y-1">
+            <div className="flex justify-between text-slate-400 text-[11px]">
+              <span>Participant Seats:</span>
+              <span className="font-mono text-indigo-400 font-bold">
+                {roomLayout.seatCount || 8} Chairs
+              </span>
+            </div>
+            <input
+              type="range"
+              min={4}
+              max={16}
+              step={2}
+              value={roomLayout.seatCount || 8}
+              onChange={(e) => onUpdateRoomLayout({ seatCount: Number(e.target.value) })}
+              className="w-full accent-indigo-500 cursor-pointer"
+            />
+          </div>
+
+          {/* Presets & Reset */}
+          <div className="flex items-center space-x-1.5 pt-2 sm:pt-0 sm:justify-end">
+            <button
+              onClick={() =>
+                onUpdateRoomLayout({
+                  tableWidthRatio: 0.42,
+                  tableHeightRatio: 0.26,
+                  seatCount: 6,
+                })
+              }
+              className="px-2 py-1 rounded bg-slate-900 hover:bg-slate-800 text-slate-300 text-[10px] border border-slate-800 transition"
+            >
+              Compact
+            </button>
+            <button
+              onClick={() =>
+                onUpdateRoomLayout({
+                  tableWidthRatio: 0.52,
+                  tableHeightRatio: 0.32,
+                  seatCount: 8,
+                })
+              }
+              className="px-2 py-1 rounded bg-slate-900 hover:bg-slate-800 text-slate-300 text-[10px] border border-slate-800 transition"
+            >
+              Standard
+            </button>
+            <button
+              onClick={() =>
+                onUpdateRoomLayout({
+                  tableWidthRatio: 0.66,
+                  tableHeightRatio: 0.36,
+                  seatCount: 12,
+                })
+              }
+              className="px-2 py-1 rounded bg-slate-900 hover:bg-slate-800 text-slate-300 text-[10px] border border-slate-800 transition"
+            >
+              Executive
+            </button>
+            <button
+              onClick={() => onUpdateRoomLayout(DEFAULT_ROOM_LAYOUT)}
+              className="p-1 rounded bg-slate-900 hover:bg-slate-800 text-slate-400 hover:text-slate-200 border border-slate-800 transition"
+              title="Reset to default table dimensions"
+            >
+              <RotateCcw className="w-3.5 h-3.5" />
+            </button>
+          </div>
+        </div>
+      )}
+
+      {/* Canvas Viewport with Mouse Drag & Resize Handler */}
       <div className="relative w-full h-[470px]">
         <canvas
           ref={canvasRef}
@@ -700,12 +1037,18 @@ export const SmartRoomDirectorCanvas: React.FC<SmartRoomDirectorCanvasProps> = (
           onMouseMove={handleMouseMove}
           onMouseUp={handleMouseUp}
           onMouseLeave={handleMouseUp}
-          className={`w-full h-full block ${isHoveringCamera ? 'cursor-grab active:cursor-grabbing' : 'cursor-crosshair'}`}
+          className={`w-full h-full block ${cursorClass}`}
         />
-        {/* Drag Hint overlay */}
-        <div className="absolute top-2 left-3 px-2 py-1 rounded bg-slate-950/70 border border-slate-800/80 text-[10px] text-slate-400 pointer-events-none flex items-center space-x-1">
-          <Move className="w-3 h-3 text-cyan-400" />
-          <span>Click &amp; drag cameras along walls to reposition</span>
+        {/* Interactive Hints Overlay */}
+        <div className="absolute top-2 left-3 flex items-center space-x-2 pointer-events-none">
+          <div className="px-2 py-1 rounded bg-slate-950/80 border border-slate-800 text-[10px] text-slate-400 flex items-center space-x-1 backdrop-blur-sm">
+            <Move className="w-3 h-3 text-cyan-400" />
+            <span>Drag cameras along walls</span>
+          </div>
+          <div className="px-2 py-1 rounded bg-slate-950/80 border border-slate-800 text-[10px] text-slate-400 flex items-center space-x-1 backdrop-blur-sm">
+            <Maximize2 className="w-3 h-3 text-emerald-400" />
+            <span>Drag table corner handle to resize</span>
+          </div>
         </div>
       </div>
 
@@ -739,13 +1082,17 @@ export const SmartRoomDirectorCanvas: React.FC<SmartRoomDirectorCanvasProps> = (
               }`}
             >
               <span
-                className={`w-2 h-2 rounded-full ${c.isLive ? 'bg-emerald-400 animate-pulse' : 'bg-slate-500'}`}
+                className={`w-2 h-2 rounded-full ${
+                  c.isLive ? 'bg-emerald-400 animate-pulse' : 'bg-slate-500'
+                }`}
               />
               <span>{c.name}:</span>
               <span className={c.isLive ? 'text-white' : 'text-slate-400'}>
                 {Math.round(c.currentPanDeg)}°
               </span>
-              {c.isLive && <span className="text-[9px] bg-emerald-500 text-slate-950 px-1 rounded">LIVE</span>}
+              {c.isLive && (
+                <span className="text-[9px] bg-emerald-500 text-slate-950 px-1 rounded">LIVE</span>
+              )}
             </button>
           ))}
           <div className="text-slate-500 pl-2 border-l border-slate-800">
@@ -756,5 +1103,38 @@ export const SmartRoomDirectorCanvas: React.FC<SmartRoomDirectorCanvasProps> = (
     </div>
   );
 };
+
+/**
+ * Computes polygon points for a camera's field-of-view visual frustum cone.
+ */
+function computeCameraFovPoints(
+  camX: number,
+  camY: number,
+  panDeg: number,
+  fovDeg: number,
+  coneRadius: number
+): { leftX: number; leftY: number; rightX: number; rightY: number; arcPoints: { x: number; y: number }[] } {
+  const halfFov = fovDeg / 2;
+  const leftAngleRad = ((panDeg - halfFov - 90) * Math.PI) / 180;
+  const rightAngleRad = ((panDeg + halfFov - 90) * Math.PI) / 180;
+
+  const leftX = camX + Math.cos(leftAngleRad) * coneRadius;
+  const leftY = camY + Math.sin(leftAngleRad) * coneRadius;
+  const rightX = camX + Math.cos(rightAngleRad) * coneRadius;
+  const rightY = camY + Math.sin(rightAngleRad) * coneRadius;
+
+  const arcPoints: { x: number; y: number }[] = [];
+  const steps = 8;
+  for (let i = 1; i < steps; i++) {
+    const fraction = i / steps;
+    const a = leftAngleRad + fraction * (rightAngleRad - leftAngleRad);
+    arcPoints.push({
+      x: camX + Math.cos(a) * coneRadius,
+      y: camY + Math.sin(a) * coneRadius,
+    });
+  }
+
+  return { leftX, leftY, rightX, rightY, arcPoints };
+}
 
 export default SmartRoomDirectorCanvas;

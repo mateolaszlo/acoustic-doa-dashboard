@@ -141,6 +141,15 @@ export interface DiarizationTimelineSegment {
   isCrossTalk: boolean;
 }
 
+export interface ActiveSpeechBurst {
+  slotId: number;
+  startMs: number;
+  durationMs: number;
+  zoneName: string;
+  avgSplDb: number;
+  isCrossTalk: boolean;
+}
+
 export interface MeetingSessionAnalytics {
   totalDurationMs: number;
   speaker0TimeMs: number;

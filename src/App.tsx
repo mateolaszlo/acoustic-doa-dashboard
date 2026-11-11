@@ -77,6 +77,7 @@ export function App() {
     speaker1,
     isCrossTalk,
     timeline,
+    activeBursts,
     analytics,
     resetMeetingSession,
   } = useMeetingDiarization(activeTracks, primaryEvent, zones, connected);
@@ -208,6 +209,7 @@ export function App() {
             {/* Diarization Timeline Gantt Ribbon & Meeting Export */}
             <DiarizationTimeline
               timeline={timeline}
+              activeBursts={activeBursts}
               analytics={analytics}
             />
           </div>

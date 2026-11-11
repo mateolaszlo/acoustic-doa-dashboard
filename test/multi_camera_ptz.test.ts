@@ -1,6 +1,7 @@
 import { describe, it, expect } from 'vitest';
 import {
   calculateSpeakerWorldPos,
+  calculateTablePerimeterPos,
   calculateCameraBearing,
   scoreCameraCandidate,
   DEFAULT_VIRTUAL_CAMERAS,
@@ -8,7 +9,7 @@ import {
   wrapAngle180,
   stepCameraPan,
 } from '../src/services/camera_ptz_math.js';
-import { VirtualCamera } from '../src/types/api_types.js';
+import { VirtualCamera, RoomLayoutConfig } from '../src/types/api_types.js';
 
 describe('Multi-Camera Studio & Trigonometric Parallax Geometry', () => {
   const arrayX = 400;
@@ -191,5 +192,64 @@ describe('Multi-Camera Studio & Trigonometric Parallax Geometry', () => {
     // Demonstrates that optimal camera assignment gives each speaker their own dedicated camera
     expect(podiumRearScore).toBeGreaterThan(audienceRearScore);
     expect(audienceFrontScore).toBeGreaterThan(podiumFrontScore);
+  });
+
+  it('calculates shape-aware speaker positions across Oval, Round, and U-Shape table geometries', () => {
+    const roomW = 800;
+    const roomH = 500;
+    const centerX = 400;
+    const centerY = 250;
+
+    // 1. Oval Table
+    const ovalLayout: RoomLayoutConfig = {
+      tableShape: 'oval',
+      tableWidthRatio: 0.5, // 400px wide
+      tableHeightRatio: 0.3, // 150px high
+      seatCount: 8,
+    };
+    const eastOval = calculateTablePerimeterPos(centerX, centerY, 90, ovalLayout, roomW, roomH);
+    expect(eastOval.x).toBeCloseTo(centerX + 200 * 0.92, 1);
+    expect(eastOval.y).toBeCloseTo(centerY, 1);
+
+    const northOval = calculateTablePerimeterPos(centerX, centerY, 0, ovalLayout, roomW, roomH);
+    expect(northOval.x).toBeCloseTo(centerX, 1);
+    expect(northOval.y).toBeCloseTo(centerY - 75 * 0.92, 1);
+
+    // 2. Round Table
+    const roundLayout: RoomLayoutConfig = {
+      tableShape: 'round',
+      tableWidthRatio: 0.4,
+      tableHeightRatio: 0.4, // 200px diameter -> 100px radius
+      seatCount: 8,
+    };
+    const eastRound = calculateTablePerimeterPos(centerX, centerY, 90, roundLayout, roomW, roomH);
+    expect(eastRound.x).toBeCloseTo(centerX + 100 * 0.95, 1);
+    expect(eastRound.y).toBeCloseTo(centerY, 1);
+
+    // 3. U-Shape Table
+    const ushapeLayout: RoomLayoutConfig = {
+      tableShape: 'ushape',
+      tableWidthRatio: 0.5, // 400px wide (left arm at 200px, right arm at 600px)
+      tableHeightRatio: 0.3, // 150px high (top at 175px, bottom at 325px)
+      seatCount: 8,
+    };
+
+    // Speaker at -90° (West) must be on the left desk arm (x ~ 200..230)
+    const westUShape = calculateTablePerimeterPos(centerX, centerY, -90, ushapeLayout, roomW, roomH);
+    expect(westUShape.x).toBeLessThan(300);
+    expect(westUShape.x).toBeGreaterThan(180);
+
+    // Speaker at +90° (East) must be on the right desk arm (x ~ 570..600)
+    const eastUShape = calculateTablePerimeterPos(centerX, centerY, 90, ushapeLayout, roomW, roomH);
+    expect(eastUShape.x).toBeGreaterThan(500);
+    expect(eastUShape.x).toBeLessThan(620);
+
+    // Speaker at 180° (South) must be on the bottom desk base (y ~ 300..325)
+    const southUShape = calculateTablePerimeterPos(centerX, centerY, 180, ushapeLayout, roomW, roomH);
+    expect(southUShape.y).toBeGreaterThan(280);
+
+    // Speaker at 0° (North) must be in the Stage/Podium area (y < centerY)
+    const northUShape = calculateTablePerimeterPos(centerX, centerY, 0, ushapeLayout, roomW, roomH);
+    expect(northUShape.y).toBeLessThan(centerY - 50);
   });
 });

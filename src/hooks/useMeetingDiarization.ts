@@ -5,6 +5,7 @@ import {
   SpatialZone,
   SpeakerSessionStats,
   DiarizationTimelineSegment,
+  ActiveSpeechBurst,
   MeetingSessionAnalytics,
 } from '../types/api_types';
 import { resolveSpatialZone } from '../services/camera_ptz_math';
@@ -52,7 +53,17 @@ export function useMeetingDiarization(
   const [speaker1, setSpeaker1] = useState<SpeakerSessionStats>(INITIAL_SPEAKER_1);
   const [isCrossTalk, setIsCrossTalk] = useState(false);
   const [timeline, setTimeline] = useState<DiarizationTimelineSegment[]>([]);
+  const [activeBursts, setActiveBursts] = useState<ActiveSpeechBurst[]>([]);
   const [analytics, setAnalytics] = useState<MeetingSessionAnalytics>(INITIAL_ANALYTICS);
+
+  const activeTracksRef = useRef(activeTracks);
+  activeTracksRef.current = activeTracks;
+
+  const latestEventRef = useRef(latestEvent);
+  latestEventRef.current = latestEvent;
+
+  const zonesRef = useRef(zones);
+  zonesRef.current = zones;
 
   const prevActive0Ref = useRef(false);
   const prevActive1Ref = useRef(false);
@@ -66,6 +77,7 @@ export function useMeetingDiarization(
     setSpeaker1(INITIAL_SPEAKER_1);
     setIsCrossTalk(false);
     setTimeline([]);
+    setActiveBursts([]);
     setAnalytics(INITIAL_ANALYTICS);
     prevActive0Ref.current = false;
     prevActive1Ref.current = false;
@@ -78,32 +90,38 @@ export function useMeetingDiarization(
   useEffect(() => {
     if (!isStreaming) return;
 
+    lastTickTimeRef.current = Date.now();
+
     const interval = setInterval(() => {
       const now = Date.now();
-      const dt = Math.min(now - lastTickTimeRef.current, 1000);
+      const dt = Math.min(now - lastTickTimeRef.current, 500);
       lastTickTimeRef.current = now;
 
+      const tracks = activeTracksRef.current;
+      const event = latestEventRef.current;
+      const currentZones = zonesRef.current;
+
       // Determine activity from tracks or recent event
-      const track0 = activeTracks.find((t) => t.trackSlot === 0 && t.state === 'ACTIVE');
-      const track1 = activeTracks.find((t) => t.trackSlot === 1 && t.state === 'ACTIVE');
+      const track0 = tracks.find((t) => t.trackSlot === 0 && t.state === 'ACTIVE');
+      const track1 = tracks.find((t) => t.trackSlot === 1 && t.state === 'ACTIVE');
 
-      const recentSlot0Event = latestEvent && (latestEvent.slotId === 0 || latestEvent.trackSlot === 0)
-        && (now - latestEvent.timestampMs < 1200) && latestEvent.soundLevelDb >= 50.0;
+      const recentSlot0Event = event && (event.slotId === 0 || event.trackSlot === 0)
+        && (now - event.timestampMs < 1200) && event.soundLevelDb >= 50.0;
 
-      const recentSlot1Event = latestEvent && (latestEvent.slotId === 1 || latestEvent.trackSlot === 1)
-        && (now - latestEvent.timestampMs < 1200) && latestEvent.soundLevelDb >= 50.0;
+      const recentSlot1Event = event && (event.slotId === 1 || event.trackSlot === 1)
+        && (now - event.timestampMs < 1200) && event.soundLevelDb >= 50.0;
 
       const active0 = Boolean(track0 || recentSlot0Event);
       const active1 = Boolean(track1 || recentSlot1Event);
       const crossTalk = active0 && active1;
 
-      const angle0 = track0 ? track0.angleDeg : (recentSlot0Event ? latestEvent!.angleDeg : null);
-      const spl0 = track0 ? track0.soundLevelDb : (recentSlot0Event ? latestEvent!.soundLevelDb : 0);
-      const zone0 = angle0 !== null ? resolveSpatialZone(angle0, zones)?.name || 'General Area' : 'Idle';
+      const angle0 = track0 ? track0.angleDeg : (recentSlot0Event ? event!.angleDeg : null);
+      const spl0 = track0 ? track0.soundLevelDb : (recentSlot0Event ? event!.soundLevelDb : 0);
+      const zone0 = angle0 !== null ? resolveSpatialZone(angle0, currentZones)?.name || 'General Area' : 'Idle';
 
-      const angle1 = track1 ? track1.angleDeg : (recentSlot1Event ? latestEvent!.angleDeg : null);
-      const spl1 = track1 ? track1.soundLevelDb : (recentSlot1Event ? latestEvent!.soundLevelDb : 0);
-      const zone1 = angle1 !== null ? resolveSpatialZone(angle1, zones)?.name || 'General Area' : 'Idle';
+      const angle1 = track1 ? track1.angleDeg : (recentSlot1Event ? event!.angleDeg : null);
+      const spl1 = track1 ? track1.soundLevelDb : (recentSlot1Event ? event!.soundLevelDb : 0);
+      const zone1 = angle1 !== null ? resolveSpatialZone(angle1, currentZones)?.name || 'General Area' : 'Idle';
 
       // Turn detection (rising edge of speech)
       const turn0Started = active0 && !prevActive0Ref.current;
@@ -170,7 +188,7 @@ export function useMeetingDiarization(
       } else if (activeBurst0Ref.current) {
         const b = activeBurst0Ref.current;
         const duration = now - b.startMs;
-        if (duration >= 300) {
+        if (duration >= 250) {
           segmentsToAdd.push({
             id: b.id,
             timestampMs: b.startMs,
@@ -201,7 +219,7 @@ export function useMeetingDiarization(
       } else if (activeBurst1Ref.current) {
         const b = activeBurst1Ref.current;
         const duration = now - b.startMs;
-        if (duration >= 300) {
+        if (duration >= 250) {
           segmentsToAdd.push({
             id: b.id,
             timestampMs: b.startMs,
@@ -215,24 +233,50 @@ export function useMeetingDiarization(
         activeBurst1Ref.current = null;
       }
 
-      if (segmentsToAdd.length > 0) {
-        setTimeline((prev) => {
-          const updated = [...prev, ...segmentsToAdd];
-          // Keep sliding window of last 60 seconds of segments (or max 80 segments)
-          const cutoff = now - 60000;
-          return updated.filter((s) => s.timestampMs + s.durationMs > cutoff).slice(-80);
+      // Track ongoing active bursts in real-time
+      const liveBursts: ActiveSpeechBurst[] = [];
+      if (active0 && activeBurst0Ref.current) {
+        liveBursts.push({
+          slotId: 0,
+          startMs: activeBurst0Ref.current.startMs,
+          durationMs: now - activeBurst0Ref.current.startMs,
+          zoneName: activeBurst0Ref.current.zone,
+          avgSplDb: Math.round(activeBurst0Ref.current.splSum / Math.max(1, activeBurst0Ref.current.count)),
+          isCrossTalk: crossTalk,
         });
       }
-    }, 200);
+      if (active1 && activeBurst1Ref.current) {
+        liveBursts.push({
+          slotId: 1,
+          startMs: activeBurst1Ref.current.startMs,
+          durationMs: now - activeBurst1Ref.current.startMs,
+          zoneName: activeBurst1Ref.current.zone,
+          avgSplDb: Math.round(activeBurst1Ref.current.splSum / Math.max(1, activeBurst1Ref.current.count)),
+          isCrossTalk: crossTalk,
+        });
+      }
+      setActiveBursts(liveBursts);
+
+      // Periodically clean timeline and append finished segments
+      setTimeline((prev) => {
+        const cutoff = now - 65000;
+        const filtered = prev.filter((s) => s.timestampMs + s.durationMs > cutoff);
+        if (segmentsToAdd.length > 0) {
+          return [...filtered, ...segmentsToAdd].slice(-100);
+        }
+        return filtered.length !== prev.length ? filtered : prev;
+      });
+    }, 100);
 
     return () => clearInterval(interval);
-  }, [activeTracks, latestEvent, zones, isStreaming]);
+  }, [isStreaming]);
 
   return {
     speaker0,
     speaker1,
     isCrossTalk,
     timeline,
+    activeBursts,
     analytics,
     resetMeetingSession,
   };
