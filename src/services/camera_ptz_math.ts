@@ -314,11 +314,13 @@ export function calculateTablePerimeterPos(
   // 1. If custom chairs exist, snap to chair coordinate if within 25°
   if (layout.customChairs && layout.customChairs.length > 0) {
     let closestChair: CustomChair | null = null;
+    let closestChairPos: { x: number; y: number } | null = null;
+    const baseCenterY = roomHeight / 2 + 10;
     let minDiff = 25.0;
 
     for (const chair of layout.customChairs) {
-      const chairPxX = chair.xRatio * roomWidth;
-      const chairPxY = chair.yRatio * roomHeight;
+      const chairPxX = centerX + (chair.xRatio - 0.5) * roomWidth;
+      const chairPxY = centerY + chair.yRatio * roomHeight - baseCenterY;
       const dx = chairPxX - centerX;
       const dy = chairPxY - centerY;
       const chairAngle = wrapAngle180((Math.atan2(dx, -dy) * 180) / Math.PI);
@@ -326,14 +328,12 @@ export function calculateTablePerimeterPos(
       if (diff < minDiff) {
         minDiff = diff;
         closestChair = chair;
+        closestChairPos = { x: chairPxX, y: chairPxY };
       }
     }
 
-    if (closestChair) {
-      return {
-        x: closestChair.xRatio * roomWidth,
-        y: closestChair.yRatio * roomHeight,
-      };
+    if (closestChair && closestChairPos) {
+      return closestChairPos;
     }
   }
 

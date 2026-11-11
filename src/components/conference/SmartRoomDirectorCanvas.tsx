@@ -51,6 +51,9 @@ interface SmartRoomDirectorCanvasProps {
   onOpenStudioSettings: () => void;
 }
 
+const BASE_ROOM_HEIGHT = 470;
+const BASE_ROOM_CENTER_Y = 245; // 470 / 2 + 10
+
 function drawChair(
   ctx: CanvasRenderingContext2D,
   x: number,
@@ -267,8 +270,8 @@ export const SmartRoomDirectorCanvas: React.FC<SmartRoomDirectorCanvasProps> = (
 
     // 1. Check camera drag
     for (const cam of camerasRef.current) {
-      const camX = cam.xRatio * rect.width;
-      const camY = cam.yRatio * rect.height;
+      const camX = centerX + (cam.xRatio - 0.5) * rect.width;
+      const camY = centerY + cam.yRatio * BASE_ROOM_HEIGHT - BASE_ROOM_CENTER_Y;
       if (Math.hypot(worldX - camX, worldY - camY) < 22) {
         draggingCamIdRef.current = cam.id;
         return;
@@ -280,11 +283,11 @@ export const SmartRoomDirectorCanvas: React.FC<SmartRoomDirectorCanvasProps> = (
     const totalSeats = Math.max(2, layout.seatCount || 8);
     const activeChairs = (layout.customChairs && layout.customChairs.length === totalSeats)
       ? layout.customChairs
-      : computeDefaultChairs(layout, rect.width, rect.height);
+      : computeDefaultChairs(layout, rect.width, BASE_ROOM_HEIGHT);
 
     for (const chair of activeChairs) {
-      const cx = chair.xRatio * rect.width;
-      const cy = chair.yRatio * rect.height;
+      const cx = centerX + (chair.xRatio - 0.5) * rect.width;
+      const cy = centerY + chair.yRatio * BASE_ROOM_HEIGHT - BASE_ROOM_CENTER_Y;
       if (Math.hypot(worldX - cx, worldY - cy) < 16) {
         draggingChairIdRef.current = chair.id;
         if (!layout.customChairs || layout.customChairs.length !== totalSeats) {
@@ -296,7 +299,7 @@ export const SmartRoomDirectorCanvas: React.FC<SmartRoomDirectorCanvasProps> = (
 
     // 3. Check table resize corner handle
     const tableW = rect.width * layout.tableWidthRatio;
-    const tableH = rect.height * layout.tableHeightRatio;
+    const tableH = BASE_ROOM_HEIGHT * layout.tableHeightRatio;
     const isRound = layout.tableShape === 'round';
     const roundR = Math.min(tableW, tableH) * 0.48;
     const handleX = isRound ? centerX + roundR * Math.cos(Math.PI / 4) : centerX + tableW / 2;
@@ -341,17 +344,17 @@ export const SmartRoomDirectorCanvas: React.FC<SmartRoomDirectorCanvasProps> = (
       const worldY = centerY + (mouseY - centerY - pan.y) / zoom;
 
       if (draggingCamIdRef.current) {
-        const xRatio = Math.max(0.04, Math.min(0.96, worldX / rect.width));
-        const yRatio = Math.max(0.04, Math.min(0.96, worldY / rect.height));
+        const xRatio = Math.max(0.04, Math.min(0.96, ((worldX - centerX) + rect.width / 2) / rect.width));
+        const yRatio = Math.max(0.04, Math.min(0.96, ((worldY - centerY) + BASE_ROOM_CENTER_Y) / BASE_ROOM_HEIGHT));
         onUpdateCamera(draggingCamIdRef.current, { xRatio, yRatio });
       } else if (draggingChairIdRef.current) {
-        const xRatio = Math.max(0.05, Math.min(0.95, worldX / rect.width));
-        const yRatio = Math.max(0.05, Math.min(0.95, worldY / rect.height));
+        const xRatio = Math.max(0.05, Math.min(0.95, ((worldX - centerX) + rect.width / 2) / rect.width));
+        const yRatio = Math.max(0.05, Math.min(0.95, ((worldY - centerY) + BASE_ROOM_CENTER_Y) / BASE_ROOM_HEIGHT));
         const layout = roomLayoutRef.current;
         const totalSeats = Math.max(2, layout.seatCount || 8);
         const activeChairs = (layout.customChairs && layout.customChairs.length === totalSeats)
           ? layout.customChairs
-          : computeDefaultChairs(layout, rect.width, rect.height);
+          : computeDefaultChairs(layout, rect.width, BASE_ROOM_HEIGHT);
 
         const updatedChairs = activeChairs.map((c) =>
           c.id === draggingChairIdRef.current ? { ...c, xRatio, yRatio } : c
@@ -361,7 +364,7 @@ export const SmartRoomDirectorCanvas: React.FC<SmartRoomDirectorCanvasProps> = (
         const isRound = roomLayoutRef.current.tableShape === 'round';
         if (isRound) {
           const dist = Math.hypot(worldX - centerX, worldY - centerY);
-          const minDim = Math.min(rect.width, rect.height);
+          const minDim = Math.min(rect.width, BASE_ROOM_HEIGHT);
           const targetRatio = Math.max(0.28, Math.min(0.75, (dist / 0.48) / minDim));
           onUpdateRoomLayout({
             tableWidthRatio: Math.round(targetRatio * 100) / 100,
@@ -371,7 +374,7 @@ export const SmartRoomDirectorCanvas: React.FC<SmartRoomDirectorCanvasProps> = (
           const deltaX = Math.max(40, worldX - centerX);
           const deltaY = Math.max(30, worldY - centerY);
           const tableWidthRatio = Math.max(0.30, Math.min(0.82, (deltaX * 2) / rect.width));
-          const tableHeightRatio = Math.max(0.20, Math.min(0.60, (deltaY * 2) / rect.height));
+          const tableHeightRatio = Math.max(0.20, Math.min(0.60, (deltaY * 2) / BASE_ROOM_HEIGHT));
           onUpdateRoomLayout({
             tableWidthRatio: Math.round(tableWidthRatio * 100) / 100,
             tableHeightRatio: Math.round(tableHeightRatio * 100) / 100,
@@ -381,8 +384,8 @@ export const SmartRoomDirectorCanvas: React.FC<SmartRoomDirectorCanvasProps> = (
         // Hover detection for cameras
         let hoveringCam = false;
         for (const cam of camerasRef.current) {
-          const camX = cam.xRatio * rect.width;
-          const camY = cam.yRatio * rect.height;
+          const camX = centerX + (cam.xRatio - 0.5) * rect.width;
+          const camY = centerY + cam.yRatio * BASE_ROOM_HEIGHT - BASE_ROOM_CENTER_Y;
           if (Math.hypot(worldX - camX, worldY - camY) < 20) {
             hoveringCam = true;
             break;
@@ -396,11 +399,11 @@ export const SmartRoomDirectorCanvas: React.FC<SmartRoomDirectorCanvasProps> = (
         const totalSeats = Math.max(2, layout.seatCount || 8);
         const activeChairs = (layout.customChairs && layout.customChairs.length === totalSeats)
           ? layout.customChairs
-          : computeDefaultChairs(layout, rect.width, rect.height);
+          : computeDefaultChairs(layout, rect.width, BASE_ROOM_HEIGHT);
 
         for (const chair of activeChairs) {
-          const cx = chair.xRatio * rect.width;
-          const cy = chair.yRatio * rect.height;
+          const cx = centerX + (chair.xRatio - 0.5) * rect.width;
+          const cy = centerY + chair.yRatio * BASE_ROOM_HEIGHT - BASE_ROOM_CENTER_Y;
           if (Math.hypot(worldX - cx, worldY - cy) < 16) {
             foundChairId = chair.id;
             break;
@@ -410,7 +413,7 @@ export const SmartRoomDirectorCanvas: React.FC<SmartRoomDirectorCanvasProps> = (
 
         // Hover detection for table resize handle
         const tableW = rect.width * layout.tableWidthRatio;
-        const tableH = rect.height * layout.tableHeightRatio;
+        const tableH = BASE_ROOM_HEIGHT * layout.tableHeightRatio;
         const isRound = layout.tableShape === 'round';
         const roundR = Math.min(tableW, tableH) * 0.48;
         const handleX = isRound ? centerX + roundR * Math.cos(Math.PI / 4) : centerX + tableW / 2;
@@ -458,7 +461,7 @@ export const SmartRoomDirectorCanvas: React.FC<SmartRoomDirectorCanvasProps> = (
       const centerY = height / 2 + 10;
       const layout = roomLayoutRef.current;
       const tableWidth = width * layout.tableWidthRatio;
-      const tableHeight = height * layout.tableHeightRatio;
+      const tableHeight = BASE_ROOM_HEIGHT * layout.tableHeightRatio;
 
       // 1. Draw Conference Room Floor & Grid
       ctx.fillStyle = '#090d16';
@@ -501,7 +504,8 @@ export const SmartRoomDirectorCanvas: React.FC<SmartRoomDirectorCanvasProps> = (
       // Room boundary perimeter
       ctx.strokeStyle = '#1e293b';
       ctx.lineWidth = 1.5;
-      ctx.strokeRect(12, 12, width - 24, height - 24);
+      const roomWallTop = centerY - BASE_ROOM_CENTER_Y + 12;
+      ctx.strokeRect(12, roomWallTop, width - 24, BASE_ROOM_HEIGHT - 24);
 
       // 2. DRAW CONFERENCE TABLE FIRST (So spatial zones overlay it cleanly)
       const tableX = centerX - tableWidth / 2;
@@ -631,11 +635,11 @@ export const SmartRoomDirectorCanvas: React.FC<SmartRoomDirectorCanvasProps> = (
       // 3. Render Independent Chairs (Custom or Auto-Arranged - No connecting lines or polygons)
       const currentChairs = (layout.customChairs && layout.customChairs.length === totalSeats)
         ? layout.customChairs
-        : computeDefaultChairs(layout, width, height);
+        : computeDefaultChairs(layout, width, BASE_ROOM_HEIGHT);
 
       for (const ch of currentChairs) {
-        const cx = ch.xRatio * width;
-        const cy = ch.yRatio * height;
+        const cx = centerX + (ch.xRatio - 0.5) * width;
+        const cy = centerY + ch.yRatio * BASE_ROOM_HEIGHT - BASE_ROOM_CENTER_Y;
         const isHovered = hoveringChairIdRef.current === ch.id;
         const isDragging = draggingChairIdRef.current === ch.id;
         drawChair(ctx, cx, cy, chairRadius, chairColor, isHovered, isDragging);
@@ -745,7 +749,7 @@ export const SmartRoomDirectorCanvas: React.FC<SmartRoomDirectorCanvasProps> = (
       let resolvedZone = 'Unassigned';
 
       if (track0) {
-        const pos0 = calculateTablePerimeterPos(centerX, centerY, track0.angleDeg, layout, width, height);
+        const pos0 = calculateTablePerimeterPos(centerX, centerY, track0.angleDeg, layout, width, BASE_ROOM_HEIGHT);
         speakerTargets.push({
           slotId: 0,
           pos: pos0,
@@ -758,7 +762,7 @@ export const SmartRoomDirectorCanvas: React.FC<SmartRoomDirectorCanvasProps> = (
       }
 
       if (track1) {
-        const pos1 = calculateTablePerimeterPos(centerX, centerY, track1.angleDeg, layout, width, height);
+        const pos1 = calculateTablePerimeterPos(centerX, centerY, track1.angleDeg, layout, width, BASE_ROOM_HEIGHT);
         speakerTargets.push({
           slotId: 1,
           pos: pos1,
@@ -775,7 +779,7 @@ export const SmartRoomDirectorCanvas: React.FC<SmartRoomDirectorCanvasProps> = (
         const latest = latestEventsRef.current[latestEventsRef.current.length - 1];
         if (Date.now() - latest.timestampMs < 1600 && latest.soundLevelDb >= 50) {
           const slot = latest.slotId ?? 0;
-          const pos = calculateTablePerimeterPos(centerX, centerY, latest.angleDeg, layout, width, height);
+          const pos = calculateTablePerimeterPos(centerX, centerY, latest.angleDeg, layout, width, BASE_ROOM_HEIGHT);
           speakerTargets.push({
             slotId: slot,
             pos,
@@ -791,7 +795,7 @@ export const SmartRoomDirectorCanvas: React.FC<SmartRoomDirectorCanvasProps> = (
       setActiveZoneName(resolvedZone);
 
       // 7. Process Multi-Camera Broadcast Assignment & Sticky Memory
-      const { activeCamera } = onProcessFrameRef.current(speakerTargets, width, height, dt);
+      const { activeCamera } = onProcessFrameRef.current(speakerTargets, width, BASE_ROOM_HEIGHT, dt);
 
       if (activeCamera && speakerTargets.some((s) => s.isActive)) {
         const aimDeg = Math.round(activeCamera.currentPanDeg);
@@ -806,12 +810,12 @@ export const SmartRoomDirectorCanvas: React.FC<SmartRoomDirectorCanvasProps> = (
       // 8. Render All Virtual Cameras (Frustums, Cones, Tally Lights)
       const currentCams = camerasRef.current;
       for (const cam of currentCams) {
-        const camX = cam.xRatio * width;
-        const camY = cam.yRatio * height;
+        const camX = centerX + (cam.xRatio - 0.5) * width;
+        const camY = centerY + cam.yRatio * BASE_ROOM_HEIGHT - BASE_ROOM_CENTER_Y;
         const isLive = cam.id === liveCamIdRef.current;
 
         // Optical FOV Cone
-        const coneRadius = Math.min(width, height) * 0.88;
+        const coneRadius = Math.min(width, BASE_ROOM_HEIGHT) * 0.88;
         const fovCone = computeCameraFovPoints(camX, camY, cam.currentPanDeg, cam.fovDeg, coneRadius);
 
         const coneGrad = ctx.createRadialGradient(camX, camY, 15, camX, camY, coneRadius);
@@ -921,7 +925,7 @@ export const SmartRoomDirectorCanvas: React.FC<SmartRoomDirectorCanvasProps> = (
 
       // 8. Draw Readable Zone Name Badges along Sector Bisectors (On top of camera cones for pristine clarity)
       if (showZonesRef.current && zonesRef.current.length > 0) {
-        const labelDist = Math.min(width, height) * 0.28;
+        const labelDist = Math.min(width, BASE_ROOM_HEIGHT) * 0.28;
         for (const zone of zonesRef.current) {
           const startDeg = zone.min_angle_deg;
           let endDeg = zone.max_angle_deg;
