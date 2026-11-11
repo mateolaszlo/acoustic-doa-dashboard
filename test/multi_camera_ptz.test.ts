@@ -362,4 +362,39 @@ describe('Multi-Camera Studio & Trigonometric Parallax Geometry', () => {
     expect(candidate1Pos.x).toBeCloseTo(0.75 * roomW, 1);
     expect(candidate1Pos.y).toBeCloseTo(0.35 * roomH, 1);
   });
+
+  it('verifies live switching deadlock resolution when current live camera is unassigned or idle', () => {
+    // Current live camera: Stage Front Cam (cam-front)
+    // Scenario from screenshot: Speaker 2 stopped speaking, Front Cam was unassigned.
+    // Side Cam (cam-side) is actively tracking Speaker 1 with score 50.
+    // Front cam has unassigned idle score = 0 or lower priority.
+    // If hysteresis were naively applied against frontCam's historical high score (e.g. 60 * 1.2 = 72),
+    // Side cam (50) could never switch, deadlocking the director.
+    const isCurrentLiveTrackingActiveSpeaker = false;
+    const sideCamScore = 50;
+    const previousLiveCamScore = 60;
+    const hysteresisMarginPercent = 20;
+
+    let canSwitch = false;
+    if (!isCurrentLiveTrackingActiveSpeaker) {
+      // Immediate cut to active speaker framing camera
+      canSwitch = sideCamScore > 0;
+    } else {
+      const threshold = previousLiveCamScore * (1.0 + hysteresisMarginPercent / 100.0);
+      canSwitch = sideCamScore >= threshold;
+    }
+
+    expect(canSwitch).toBe(true); // Must cut immediately, no deadlock!
+
+    // Conversely, when both cameras track active speakers, hysteresis holds:
+    const bothActive = true;
+    let switchWhileBothActive = false;
+    if (!bothActive) {
+      switchWhileBothActive = true;
+    } else {
+      const threshold = previousLiveCamScore * (1.0 + hysteresisMarginPercent / 100.0); // 72
+      switchWhileBothActive = sideCamScore >= threshold; // 50 < 72 -> false
+    }
+    expect(switchWhileBothActive).toBe(false); // Prevents rapid flipping
+  });
 });

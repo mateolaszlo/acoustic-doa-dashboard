@@ -64,46 +64,76 @@ export function useMultiCameraDirector(
       }
 
       // Step 1: Manage Camera-to-Speaker Subject Allocation
-      // For each active speaker, bind them to their dedicated camera
-      for (const speaker of activeSpeakers) {
-        // Check if a camera is already assigned to this speaker slot
-        let boundCam = currentCameras.find((c) => c.assignedTargetSlot === speaker.slotId);
+      // 1a. Release camera bindings for speaker slots that are no longer active
+      const activeSlotIds = new Set(activeSpeakers.map((s) => s.slotId));
+      currentCameras = currentCameras.map((c) => {
+        if (c.assignedTargetSlot !== null && !activeSlotIds.has(c.assignedTargetSlot)) {
+          return { ...c, assignedTargetSlot: null, isLockedOnSubject: false };
+        }
+        return c;
+      });
 
-        if (!boundCam) {
-          // Camera not yet assigned: find best candidate among unassigned cameras (or non-live cameras)
-          const availableCams = currentCameras.filter(
-            (c) => c.assignedTargetSlot === null || (!c.isLive && c.id !== currentLiveId)
+      // 1b. Bind active speakers to optimal cameras
+      if (activeSpeakers.length === 1) {
+        // Solo speaker: assign to the single best camera in the room
+        const spk = activeSpeakers[0];
+        const scored = currentCameras.map((cam) => ({
+          cam,
+          score: scoreCameraCandidate(cam, spk.pos, spk.angleDeg, roomWidth, roomHeight),
+        }));
+        scored.sort((a, b) => b.score - a.score);
+
+        if (scored.length > 0) {
+          const bestCam = scored[0].cam;
+          currentCameras = currentCameras.map((c) =>
+            c.id === bestCam.id
+              ? {
+                  ...c,
+                  assignedTargetSlot: spk.slotId,
+                  isLockedOnSubject: true,
+                  lastTargetPos: spk.pos,
+                }
+              : c.assignedTargetSlot === spk.slotId
+              ? { ...c, assignedTargetSlot: null, isLockedOnSubject: false }
+              : c
           );
-          const pool = availableCams.length > 0 ? availableCams : currentCameras;
+        }
+      } else if (activeSpeakers.length > 1) {
+        // Multi-speaker discussion: assign dedicated cameras to each speaker
+        for (const speaker of activeSpeakers) {
+          let boundCam = currentCameras.find((c) => c.assignedTargetSlot === speaker.slotId);
 
-          // Score cameras for this speaker
-          const scored = pool.map((cam) => ({
-            cam,
-            score: scoreCameraCandidate(cam, speaker.pos, speaker.angleDeg, roomWidth, roomHeight),
-          }));
-          scored.sort((a, b) => b.score - a.score);
+          if (!boundCam) {
+            const availableCams = currentCameras.filter((c) => c.assignedTargetSlot === null);
+            const pool = availableCams.length > 0 ? availableCams : currentCameras;
 
-          if (scored.length > 0) {
-            boundCam = scored[0].cam;
-            // Bind camera to this speaker slot
+            const scored = pool.map((cam) => ({
+              cam,
+              score: scoreCameraCandidate(cam, speaker.pos, speaker.angleDeg, roomWidth, roomHeight),
+            }));
+            scored.sort((a, b) => b.score - a.score);
+
+            if (scored.length > 0) {
+              boundCam = scored[0].cam;
+              currentCameras = currentCameras.map((c) =>
+                c.id === boundCam!.id
+                  ? {
+                      ...c,
+                      assignedTargetSlot: speaker.slotId,
+                      isLockedOnSubject: true,
+                      lastTargetPos: speaker.pos,
+                    }
+                  : c.assignedTargetSlot === speaker.slotId
+                  ? { ...c, assignedTargetSlot: null, isLockedOnSubject: false }
+                  : c
+              );
+            }
+          } else {
+            // Update last target position for persistent sticky framing
             currentCameras = currentCameras.map((c) =>
-              c.id === boundCam!.id
-                ? {
-                    ...c,
-                    assignedTargetSlot: speaker.slotId,
-                    isLockedOnSubject: true,
-                    lastTargetPos: speaker.pos,
-                  }
-                : c.assignedTargetSlot === speaker.slotId
-                ? { ...c, assignedTargetSlot: null, isLockedOnSubject: false }
-                : c
+              c.id === boundCam!.id ? { ...c, lastTargetPos: speaker.pos } : c
             );
           }
-        } else {
-          // Update last target position for persistent sticky framing
-          currentCameras = currentCameras.map((c) =>
-            c.id === boundCam!.id ? { ...c, lastTargetPos: speaker.pos } : c
-          );
         }
       }
 
@@ -112,13 +142,12 @@ export function useMultiCameraDirector(
         const camX = cam.xRatio * roomWidth;
         const camY = cam.yRatio * roomHeight;
 
-        // If camera is bound to a speaker
+        // If camera is bound to an active speaker
         if (cam.assignedTargetSlot !== null) {
           const boundSpeaker = speakers.find((s) => s.slotId === cam.assignedTargetSlot);
           const targetPos = boundSpeaker?.pos || cam.lastTargetPos;
 
           if (targetPos) {
-            // Camera tracks its assigned speaker
             const aimAngle = calculateCameraBearing(camX, camY, targetPos.x, targetPos.y);
             return {
               ...cam,
@@ -160,21 +189,21 @@ export function useMultiCameraDirector(
         const targetCam = currentCameras.find((c) => c.assignedTargetSlot === dominantSpeaker.slotId);
 
         if (targetCam && targetCam.id !== currentLiveId) {
-          const timeSinceLastSwitch = now - lastSwitchTimeRef.current;
           const currentLiveCam = currentCameras.find((c) => c.id === currentLiveId);
+          const isCurrentLiveTrackingActiveSpeaker =
+            currentLiveCam &&
+            currentLiveCam.assignedTargetSlot !== null &&
+            activeSpeakers.some((s) => s.slotId === currentLiveCam.assignedTargetSlot);
 
-          const liveScore = currentLiveCam
-            ? scoreCameraCandidate(currentLiveCam, dominantSpeaker.pos, dominantSpeaker.angleDeg, roomWidth, roomHeight)
-            : 0;
-          const targetScore = scoreCameraCandidate(targetCam, dominantSpeaker.pos, dominantSpeaker.angleDeg, roomWidth, roomHeight);
-          const threshold = liveScore * (1.0 + config.hysteresisMarginPercent / 100.0);
+          const timeSinceLastSwitch = now - lastSwitchTimeRef.current;
 
-          // Schmitt Trigger: Hold time + Score margin + Confirmation debounce
-          if (timeSinceLastSwitch >= config.holdTimeMs && targetScore >= threshold) {
+          // If the currently live camera is NOT tracking any active speaker,
+          // cut immediately to the camera that IS framing the talking speaker!
+          if (!isCurrentLiveTrackingActiveSpeaker) {
             if (candidateCamIdRef.current !== targetCam.id) {
               candidateCamIdRef.current = targetCam.id;
               candidateStartTimeRef.current = now;
-            } else if (now - candidateStartTimeRef.current >= config.confirmTimeMs) {
+            } else if (now - candidateStartTimeRef.current >= Math.min(config.confirmTimeMs, 150)) {
               newLiveId = targetCam.id;
               hasSwitched = true;
               lastSwitchTimeRef.current = now;
@@ -182,7 +211,37 @@ export function useMultiCameraDirector(
               setLiveCamId(newLiveId);
             }
           } else {
-            candidateCamIdRef.current = null;
+            // Both cameras are framing active speakers -> Apply Schmitt-trigger hysteresis
+            const liveScore = scoreCameraCandidate(
+              currentLiveCam!,
+              dominantSpeaker.pos,
+              dominantSpeaker.angleDeg,
+              roomWidth,
+              roomHeight
+            );
+            const targetScore = scoreCameraCandidate(
+              targetCam,
+              dominantSpeaker.pos,
+              dominantSpeaker.angleDeg,
+              roomWidth,
+              roomHeight
+            );
+            const threshold = liveScore * (1.0 + config.hysteresisMarginPercent / 100.0);
+
+            if (timeSinceLastSwitch >= config.holdTimeMs && targetScore >= threshold) {
+              if (candidateCamIdRef.current !== targetCam.id) {
+                candidateCamIdRef.current = targetCam.id;
+                candidateStartTimeRef.current = now;
+              } else if (now - candidateStartTimeRef.current >= config.confirmTimeMs) {
+                newLiveId = targetCam.id;
+                hasSwitched = true;
+                lastSwitchTimeRef.current = now;
+                candidateCamIdRef.current = null;
+                setLiveCamId(newLiveId);
+              }
+            } else {
+              candidateCamIdRef.current = null;
+            }
           }
         } else {
           candidateCamIdRef.current = null;
