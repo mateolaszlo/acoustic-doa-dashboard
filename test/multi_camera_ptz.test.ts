@@ -9,8 +9,9 @@ import {
   wrapAngle180,
   stepCameraPan,
   resolveSpatialZone,
+  computeDefaultChairs,
 } from '../src/services/camera_ptz_math.js';
-import { VirtualCamera, RoomLayoutConfig, SpatialZone } from '../src/types/api_types.js';
+import { VirtualCamera, RoomLayoutConfig, SpatialZone, CustomChair } from '../src/types/api_types.js';
 
 describe('Multi-Camera Studio & Trigonometric Parallax Geometry', () => {
   const arrayX = 400;
@@ -201,7 +202,7 @@ describe('Multi-Camera Studio & Trigonometric Parallax Geometry', () => {
     const centerX = 400;
     const centerY = 250;
 
-    // 1. Oval Table
+    // 1. Oval Table (Ray-Box Perimeter Geometry)
     const ovalLayout: RoomLayoutConfig = {
       tableShape: 'oval',
       tableWidthRatio: 0.5, // 400px wide
@@ -209,12 +210,21 @@ describe('Multi-Camera Studio & Trigonometric Parallax Geometry', () => {
       seatCount: 8,
     };
     const eastOval = calculateTablePerimeterPos(centerX, centerY, 90, ovalLayout, roomW, roomH);
-    expect(eastOval.x).toBeCloseTo(centerX + 200 * 0.92, 1);
+    expect(eastOval.x).toBeCloseTo(centerX + 200 * 0.95, 1);
     expect(eastOval.y).toBeCloseTo(centerY, 1);
 
     const northOval = calculateTablePerimeterPos(centerX, centerY, 0, ovalLayout, roomW, roomH);
     expect(northOval.x).toBeCloseTo(centerX, 1);
-    expect(northOval.y).toBeCloseTo(centerY - 75 * 0.92, 1);
+    expect(northOval.y).toBeCloseTo(centerY - 75 * 0.95, 1);
+
+    // Sound arrival at +100°: hits East edge directly
+    const eastEdge = calculateTablePerimeterPos(centerX, centerY, 100, ovalLayout, roomW, roomH);
+    expect(eastEdge.x).toBeCloseTo(centerX + 200 * 0.95, 1); // Exact East desk edge
+
+    // Sound arrival at +111°: exits South edge near corner (y = centerY + halfH * 0.95)
+    const diagOval = calculateTablePerimeterPos(centerX, centerY, 111, ovalLayout, roomW, roomH);
+    expect(diagOval.y).toBeCloseTo(centerY + 75 * 0.95, 1); // On desk perimeter
+    expect(diagOval.x).toBeGreaterThan(centerX + 180); // Near corner
 
     // 2. Round Table
     const roundLayout: RoomLayoutConfig = {
@@ -283,5 +293,73 @@ describe('Multi-Camera Studio & Trigonometric Parallax Geometry', () => {
     expect(resolveSpatialZone(-90, zones)?.name).toBe('West Chair');
     expect(resolveSpatialZone(-60, zones)?.name).toBe('West Chair');
     expect(resolveSpatialZone(-130, zones)?.name).toBe('West Chair');
+  });
+
+  it('generates isolated default chair positions down to 2 seats and supports custom chair snapping', () => {
+    const roomW = 800;
+    const roomH = 500;
+    const centerX = 400;
+    const centerY = 260; // 500 / 2 + 10
+
+    // Test 2-chair 1-on-1 meeting setup
+    const twoChairLayout: RoomLayoutConfig = {
+      tableShape: 'oval',
+      tableWidthRatio: 0.4,
+      tableHeightRatio: 0.25,
+      seatCount: 2,
+    };
+    const chairs2 = computeDefaultChairs(twoChairLayout, roomW, roomH);
+    expect(chairs2).toHaveLength(2);
+    expect(chairs2[0].id).toBe('chair-0');
+    expect(chairs2[1].id).toBe('chair-1');
+    // In 2-chair setup, chairs face each other across North and South
+    expect(chairs2[0].xRatio).toBeCloseTo(0.5, 2);
+    expect(chairs2[1].xRatio).toBeCloseTo(0.5, 2);
+    expect(chairs2[0].yRatio).toBeLessThan(chairs2[1].yRatio);
+
+    // Test 4-chair layout
+    const fourChairLayout: RoomLayoutConfig = {
+      tableShape: 'oval',
+      tableWidthRatio: 0.5,
+      tableHeightRatio: 0.3,
+      seatCount: 4,
+    };
+    const chairs4 = computeDefaultChairs(fourChairLayout, roomW, roomH);
+    expect(chairs4).toHaveLength(4);
+    // Distinct IDs
+    const ids = new Set(chairs4.map((c) => c.id));
+    expect(ids.size).toBe(4);
+
+    // Test custom chair repositioning & snap
+    // Create asymmetric 1-3 interview setup: 1 chair on West, 3 chairs on East
+    const customChairs: CustomChair[] = [
+      { id: 'chair-interviewer', xRatio: 0.25, yRatio: 0.52 }, // West (-90°)
+      { id: 'chair-candidate-1', xRatio: 0.75, yRatio: 0.35 }, // East-North (+60°)
+      { id: 'chair-candidate-2', xRatio: 0.75, yRatio: 0.52 }, // East (+90°)
+      { id: 'chair-candidate-3', xRatio: 0.75, yRatio: 0.69 }, // East-South (+120°)
+    ];
+
+    const customLayout: RoomLayoutConfig = {
+      tableShape: 'oval',
+      tableWidthRatio: 0.5,
+      tableHeightRatio: 0.3,
+      seatCount: 4,
+      customChairs,
+    };
+
+    // Sound arriving from West (-90°): must snap to interviewer chair at (200, 260)
+    const interviewerPos = calculateTablePerimeterPos(centerX, centerY, -90, customLayout, roomW, roomH);
+    expect(interviewerPos.x).toBeCloseTo(0.25 * roomW, 1);
+    expect(interviewerPos.y).toBeCloseTo(0.52 * roomH, 1);
+
+    // Sound arriving from East (+90°): must snap to candidate-2 chair at (600, 260)
+    const candidate2Pos = calculateTablePerimeterPos(centerX, centerY, 90, customLayout, roomW, roomH);
+    expect(candidate2Pos.x).toBeCloseTo(0.75 * roomW, 1);
+    expect(candidate2Pos.y).toBeCloseTo(0.52 * roomH, 1);
+
+    // Sound arriving from East-North (+62°): within 25° of candidate-1 (+60°)
+    const candidate1Pos = calculateTablePerimeterPos(centerX, centerY, 62, customLayout, roomW, roomH);
+    expect(candidate1Pos.x).toBeCloseTo(0.75 * roomW, 1);
+    expect(candidate1Pos.y).toBeCloseTo(0.35 * roomH, 1);
   });
 });

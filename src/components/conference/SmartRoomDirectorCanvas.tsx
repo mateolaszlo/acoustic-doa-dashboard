@@ -11,6 +11,7 @@ import {
   calculateTablePerimeterPos,
   resolveSpatialZone,
   DEFAULT_ROOM_LAYOUT,
+  computeDefaultChairs,
 } from '../../services/camera_ptz_math';
 import { ActiveSpeakerTarget } from '../../hooks/useMultiCameraDirector';
 import {
@@ -46,6 +47,32 @@ interface SmartRoomDirectorCanvasProps {
   onOpenStudioSettings: () => void;
 }
 
+function drawChair(
+  ctx: CanvasRenderingContext2D,
+  x: number,
+  y: number,
+  radius: number,
+  color: string,
+  isHovered: boolean = false,
+  isDragging: boolean = false
+) {
+  ctx.save();
+  ctx.beginPath();
+  ctx.arc(x, y, radius, 0, Math.PI * 2);
+  ctx.fillStyle = isDragging ? '#10b981' : isHovered ? '#38bdf8' : color;
+  ctx.fill();
+  ctx.strokeStyle = isDragging ? '#34d399' : isHovered ? '#7dd3fc' : '#1e293b';
+  ctx.lineWidth = isHovered || isDragging ? 2 : 1;
+  ctx.stroke();
+
+  // Subtle chair center dot for high-DPI finish
+  ctx.beginPath();
+  ctx.arc(x, y, radius * 0.4, 0, Math.PI * 2);
+  ctx.fillStyle = isDragging ? '#064e3b' : isHovered ? '#0369a1' : '#334155';
+  ctx.fill();
+  ctx.restore();
+}
+
 export const SmartRoomDirectorCanvas: React.FC<SmartRoomDirectorCanvasProps> = ({
   activeTracks = [],
   latestEvents = [],
@@ -62,6 +89,7 @@ export const SmartRoomDirectorCanvas: React.FC<SmartRoomDirectorCanvasProps> = (
   const canvasRef = useRef<HTMLCanvasElement | null>(null);
   const lastTimeRef = useRef<number>(performance.now());
   const draggingCamIdRef = useRef<string | null>(null);
+  const draggingChairIdRef = useRef<string | null>(null);
   const isResizingTableRef = useRef<boolean>(false);
 
   // Component UI State
@@ -69,6 +97,9 @@ export const SmartRoomDirectorCanvas: React.FC<SmartRoomDirectorCanvasProps> = (
   const [cameraStatus, setCameraStatus] = useState<string>('IDLE • MULTI-CAMERA STANDBY');
   const [activeZoneName, setActiveZoneName] = useState<string>('None');
   const [isHoveringCamera, setIsHoveringCamera] = useState(false);
+  const [hoveringChairId, setHoveringChairId] = useState<string | null>(null);
+  const hoveringChairIdRef = useRef<string | null>(null);
+  hoveringChairIdRef.current = hoveringChairId;
   const [isHoveringResize, setIsHoveringResize] = useState(false);
   const [isTableSettingsOpen, setIsTableSettingsOpen] = useState(false);
 
@@ -96,7 +127,7 @@ export const SmartRoomDirectorCanvas: React.FC<SmartRoomDirectorCanvasProps> = (
   const onProcessFrameRef = useRef(onProcessFrame);
   onProcessFrameRef.current = onProcessFrame;
 
-  // Mouse interaction handlers for direct camera drag-and-drop & table resizing
+  // Mouse interaction handlers for direct camera drag-and-drop, chair repositioning & table resizing
   const handleMouseDown = useCallback((e: React.MouseEvent<HTMLCanvasElement>) => {
     const canvas = canvasRef.current;
     if (!canvas) return;
@@ -104,7 +135,7 @@ export const SmartRoomDirectorCanvas: React.FC<SmartRoomDirectorCanvasProps> = (
     const mouseX = e.clientX - rect.left;
     const mouseY = e.clientY - rect.top;
 
-    // Check camera drag first
+    // 1. Check camera drag
     for (const cam of camerasRef.current) {
       const camX = cam.xRatio * rect.width;
       const camY = cam.yRatio * rect.height;
@@ -114,19 +145,39 @@ export const SmartRoomDirectorCanvas: React.FC<SmartRoomDirectorCanvasProps> = (
       }
     }
 
-    // Check table resize corner handle
+    // 2. Check chair drag
+    const layout = roomLayoutRef.current;
+    const totalSeats = Math.max(2, layout.seatCount || 8);
+    const activeChairs = (layout.customChairs && layout.customChairs.length === totalSeats)
+      ? layout.customChairs
+      : computeDefaultChairs(layout, rect.width, rect.height);
+
+    for (const chair of activeChairs) {
+      const cx = chair.xRatio * rect.width;
+      const cy = chair.yRatio * rect.height;
+      if (Math.hypot(mouseX - cx, mouseY - cy) < 16) {
+        draggingChairIdRef.current = chair.id;
+        if (!layout.customChairs || layout.customChairs.length !== totalSeats) {
+          onUpdateRoomLayout({ customChairs: activeChairs });
+        }
+        return;
+      }
+    }
+
+    // 3. Check table resize corner handle
     const centerX = rect.width / 2;
     const centerY = rect.height / 2 + 10;
-    const layout = roomLayoutRef.current;
     const tableW = rect.width * layout.tableWidthRatio;
     const tableH = rect.height * layout.tableHeightRatio;
-    const handleX = centerX + tableW / 2;
-    const handleY = centerY + tableH / 2;
+    const isRound = layout.tableShape === 'round';
+    const roundR = Math.min(tableW, tableH) * 0.48;
+    const handleX = isRound ? centerX + roundR * Math.cos(Math.PI / 4) : centerX + tableW / 2;
+    const handleY = isRound ? centerY + roundR * Math.sin(Math.PI / 4) : centerY + tableH / 2;
 
     if (Math.hypot(mouseX - handleX, mouseY - handleY) < 20) {
       isResizingTableRef.current = true;
     }
-  }, []);
+  }, [onUpdateRoomLayout]);
 
   const handleMouseMove = useCallback(
     (e: React.MouseEvent<HTMLCanvasElement>) => {
@@ -140,17 +191,41 @@ export const SmartRoomDirectorCanvas: React.FC<SmartRoomDirectorCanvasProps> = (
         const xRatio = Math.max(0.04, Math.min(0.96, mouseX / rect.width));
         const yRatio = Math.max(0.04, Math.min(0.96, mouseY / rect.height));
         onUpdateCamera(draggingCamIdRef.current, { xRatio, yRatio });
+      } else if (draggingChairIdRef.current) {
+        const xRatio = Math.max(0.05, Math.min(0.95, mouseX / rect.width));
+        const yRatio = Math.max(0.05, Math.min(0.95, mouseY / rect.height));
+        const layout = roomLayoutRef.current;
+        const totalSeats = Math.max(2, layout.seatCount || 8);
+        const activeChairs = (layout.customChairs && layout.customChairs.length === totalSeats)
+          ? layout.customChairs
+          : computeDefaultChairs(layout, rect.width, rect.height);
+
+        const updatedChairs = activeChairs.map((c) =>
+          c.id === draggingChairIdRef.current ? { ...c, xRatio, yRatio } : c
+        );
+        onUpdateRoomLayout({ customChairs: updatedChairs });
       } else if (isResizingTableRef.current) {
         const centerX = rect.width / 2;
         const centerY = rect.height / 2 + 10;
-        const deltaX = Math.max(40, mouseX - centerX);
-        const deltaY = Math.max(30, mouseY - centerY);
-        const tableWidthRatio = Math.max(0.30, Math.min(0.82, (deltaX * 2) / rect.width));
-        const tableHeightRatio = Math.max(0.20, Math.min(0.60, (deltaY * 2) / rect.height));
-        onUpdateRoomLayout({
-          tableWidthRatio: Math.round(tableWidthRatio * 100) / 100,
-          tableHeightRatio: Math.round(tableHeightRatio * 100) / 100,
-        });
+        const isRound = roomLayoutRef.current.tableShape === 'round';
+        if (isRound) {
+          const dist = Math.hypot(mouseX - centerX, mouseY - centerY);
+          const minDim = Math.min(rect.width, rect.height);
+          const targetRatio = Math.max(0.28, Math.min(0.75, (dist / 0.48) / minDim));
+          onUpdateRoomLayout({
+            tableWidthRatio: Math.round(targetRatio * 100) / 100,
+            tableHeightRatio: Math.round(targetRatio * 100) / 100,
+          });
+        } else {
+          const deltaX = Math.max(40, mouseX - centerX);
+          const deltaY = Math.max(30, mouseY - centerY);
+          const tableWidthRatio = Math.max(0.30, Math.min(0.82, (deltaX * 2) / rect.width));
+          const tableHeightRatio = Math.max(0.20, Math.min(0.60, (deltaY * 2) / rect.height));
+          onUpdateRoomLayout({
+            tableWidthRatio: Math.round(tableWidthRatio * 100) / 100,
+            tableHeightRatio: Math.round(tableHeightRatio * 100) / 100,
+          });
+        }
       } else {
         // Hover detection for cameras
         let hoveringCam = false;
@@ -164,14 +239,33 @@ export const SmartRoomDirectorCanvas: React.FC<SmartRoomDirectorCanvasProps> = (
         }
         setIsHoveringCamera(hoveringCam);
 
+        // Hover detection for chairs
+        let foundChairId: string | null = null;
+        const layout = roomLayoutRef.current;
+        const totalSeats = Math.max(2, layout.seatCount || 8);
+        const activeChairs = (layout.customChairs && layout.customChairs.length === totalSeats)
+          ? layout.customChairs
+          : computeDefaultChairs(layout, rect.width, rect.height);
+
+        for (const chair of activeChairs) {
+          const cx = chair.xRatio * rect.width;
+          const cy = chair.yRatio * rect.height;
+          if (Math.hypot(mouseX - cx, mouseY - cy) < 16) {
+            foundChairId = chair.id;
+            break;
+          }
+        }
+        setHoveringChairId(foundChairId);
+
         // Hover detection for table resize handle
         const centerX = rect.width / 2;
         const centerY = rect.height / 2 + 10;
-        const layout = roomLayoutRef.current;
         const tableW = rect.width * layout.tableWidthRatio;
         const tableH = rect.height * layout.tableHeightRatio;
-        const handleX = centerX + tableW / 2;
-        const handleY = centerY + tableH / 2;
+        const isRound = layout.tableShape === 'round';
+        const roundR = Math.min(tableW, tableH) * 0.48;
+        const handleX = isRound ? centerX + roundR * Math.cos(Math.PI / 4) : centerX + tableW / 2;
+        const handleY = isRound ? centerY + roundR * Math.sin(Math.PI / 4) : centerY + tableH / 2;
         setIsHoveringResize(Math.hypot(mouseX - handleX, mouseY - handleY) < 18);
       }
     },
@@ -180,6 +274,7 @@ export const SmartRoomDirectorCanvas: React.FC<SmartRoomDirectorCanvasProps> = (
 
   const handleMouseUp = useCallback(() => {
     draggingCamIdRef.current = null;
+    draggingChairIdRef.current = null;
     isResizingTableRef.current = false;
   }, []);
 
@@ -244,8 +339,8 @@ export const SmartRoomDirectorCanvas: React.FC<SmartRoomDirectorCanvasProps> = (
       const tableX = centerX - tableWidth / 2;
       const tableY = centerY - tableHeight / 2;
       const chairColor = '#475569';
-      const chairRadius = 4.5;
-      const totalSeats = layout.seatCount || 8;
+      const chairRadius = 5.5;
+      const totalSeats = Math.max(2, layout.seatCount || 8);
 
       ctx.shadowColor = 'rgba(0, 0, 0, 0.6)';
       ctx.shadowBlur = 16;
@@ -266,40 +361,9 @@ export const SmartRoomDirectorCanvas: React.FC<SmartRoomDirectorCanvasProps> = (
         ctx.strokeStyle = '#334155';
         ctx.lineWidth = 2;
         ctx.stroke();
-
-        // Seating chairs around oval
-        if (totalSeats <= 4) {
-          // Exactly 4 chairs: 1 North, 1 East, 1 South, 1 West
-          ctx.beginPath();
-          ctx.arc(centerX, tableY - 11, chairRadius, 0, Math.PI * 2); // North
-          ctx.arc(centerX, tableY + tableHeight + 11, chairRadius, 0, Math.PI * 2); // South
-          ctx.arc(tableX - 11, centerY, chairRadius, 0, Math.PI * 2); // West
-          ctx.arc(tableX + tableWidth + 11, centerY, chairRadius, 0, Math.PI * 2); // East
-          ctx.fillStyle = chairColor;
-          ctx.fill();
-        } else {
-          // 2 head chairs (West and East)
-          ctx.beginPath();
-          ctx.arc(tableX - 11, centerY, chairRadius, 0, Math.PI * 2);
-          ctx.arc(tableX + tableWidth + 11, centerY, chairRadius, 0, Math.PI * 2);
-          ctx.fillStyle = chairColor;
-          ctx.fill();
-
-          // Remaining chairs distributed evenly along top and bottom
-          const perSide = Math.floor((totalSeats - 2) / 2);
-          for (let i = 0; i < perSide; i++) {
-            const t = perSide > 1 ? i / (perSide - 1) : 0.5;
-            const cx = tableX + 36 + t * (tableWidth - 72);
-            ctx.beginPath();
-            ctx.arc(cx, tableY - 11, chairRadius, 0, Math.PI * 2);
-            ctx.arc(cx, tableY + tableHeight + 11, chairRadius, 0, Math.PI * 2);
-            ctx.fillStyle = chairColor;
-            ctx.fill();
-          }
-        }
       } else if (layout.tableShape === 'round') {
         // Roundtable Circle Table
-        const r = Math.min(tableWidth, tableHeight) * 0.44;
+        const r = Math.min(tableWidth, tableHeight) * 0.48;
         ctx.beginPath();
         ctx.arc(centerX, centerY, r, 0, Math.PI * 2);
         ctx.fillStyle = '#1e293b';
@@ -309,21 +373,6 @@ export const SmartRoomDirectorCanvas: React.FC<SmartRoomDirectorCanvasProps> = (
         ctx.strokeStyle = '#334155';
         ctx.lineWidth = 2;
         ctx.stroke();
-
-        // Radial chairs around circle
-        for (let i = 0; i < totalSeats; i++) {
-          const ang = (i / totalSeats) * Math.PI * 2 - Math.PI / 2;
-          ctx.beginPath();
-          ctx.arc(
-            centerX + Math.cos(ang) * (r + 12),
-            centerY + Math.sin(ang) * (r + 12),
-            chairRadius,
-            0,
-            Math.PI * 2
-          );
-          ctx.fillStyle = chairColor;
-          ctx.fill();
-        }
       } else if (layout.tableShape === 'ushape') {
         // U-Shape Auditorium Table (Open North towards Stage/Screen)
         const wallThick = Math.max(34, Math.min(tableWidth * 0.22, tableHeight * 0.32));
@@ -379,37 +428,6 @@ export const SmartRoomDirectorCanvas: React.FC<SmartRoomDirectorCanvasProps> = (
         ctx.lineWidth = 2;
         ctx.stroke();
         ctx.restore();
-
-        // Seating chairs distributed dynamically along outer wings
-        const sideSeats = Math.max(2, Math.floor(totalSeats * 0.35));
-        const bottomSeats = Math.max(2, totalSeats - sideSeats * 2);
-
-        // Left wing chairs (outer)
-        for (let i = 0; i < sideSeats; i++) {
-          const cy = tableY + 24 + (i / Math.max(1, sideSeats - 1)) * (tableHeight - 48);
-          ctx.beginPath();
-          ctx.arc(tableX - 12, cy, chairRadius, 0, Math.PI * 2);
-          ctx.fillStyle = chairColor;
-          ctx.fill();
-        }
-
-        // Right wing chairs (outer)
-        for (let i = 0; i < sideSeats; i++) {
-          const cy = tableY + 24 + (i / Math.max(1, sideSeats - 1)) * (tableHeight - 48);
-          ctx.beginPath();
-          ctx.arc(tableX + tableWidth + 12, cy, chairRadius, 0, Math.PI * 2);
-          ctx.fillStyle = chairColor;
-          ctx.fill();
-        }
-
-        // Bottom wing chairs (outer)
-        for (let i = 0; i < bottomSeats; i++) {
-          const cx = tableX + 32 + (i / Math.max(1, bottomSeats - 1)) * (tableWidth - 64);
-          ctx.beginPath();
-          ctx.arc(cx, tableY + tableHeight + 12, chairRadius, 0, Math.PI * 2);
-          ctx.fillStyle = chairColor;
-          ctx.fill();
-        }
       } else {
         // Hollow Square Executive Table
         const wallThick = Math.max(28, Math.min(tableWidth * 0.2, tableHeight * 0.28));
@@ -440,24 +458,22 @@ export const SmartRoomDirectorCanvas: React.FC<SmartRoomDirectorCanvasProps> = (
           tableWidth - wallThick * 2,
           tableHeight - wallThick * 2
         );
-
-        // Seating chairs distributed around 4 sides
-        const perSide = Math.max(1, Math.floor(totalSeats / 4));
-        for (let i = 0; i < perSide; i++) {
-          const t = perSide > 1 ? i / (perSide - 1) : 0.5;
-          const cx = tableX + 28 + t * (tableWidth - 56);
-          const cy = tableY + 28 + t * (tableHeight - 56);
-          ctx.beginPath();
-          ctx.arc(cx, tableY - 11, chairRadius, 0, Math.PI * 2);
-          ctx.arc(cx, tableY + tableHeight + 11, chairRadius, 0, Math.PI * 2);
-          ctx.arc(tableX - 11, cy, chairRadius, 0, Math.PI * 2);
-          ctx.arc(tableX + tableWidth + 11, cy, chairRadius, 0, Math.PI * 2);
-          ctx.fillStyle = chairColor;
-          ctx.fill();
-        }
       }
 
-      // 3. DRAW GEOFENCED SPATIAL ZONES OVER THE TABLE
+      // 3. Render Independent Chairs (Custom or Auto-Arranged - No connecting lines or polygons)
+      const currentChairs = (layout.customChairs && layout.customChairs.length === totalSeats)
+        ? layout.customChairs
+        : computeDefaultChairs(layout, width, height);
+
+      for (const ch of currentChairs) {
+        const cx = ch.xRatio * width;
+        const cy = ch.yRatio * height;
+        const isHovered = hoveringChairIdRef.current === ch.id;
+        const isDragging = draggingChairIdRef.current === ch.id;
+        drawChair(ctx, cx, cy, chairRadius, chairColor, isHovered, isDragging);
+      }
+
+      // 4. DRAW GEOFENCED SPATIAL ZONES OVER THE TABLE
       if (showZonesRef.current && zonesRef.current.length > 0) {
         const zoneRadius = Math.min(width, height) * 0.44;
         for (const zone of zonesRef.current) {
@@ -510,27 +526,34 @@ export const SmartRoomDirectorCanvas: React.FC<SmartRoomDirectorCanvasProps> = (
           const lx = centerX + Math.cos(midRad) * labelDist;
           const ly = centerY + Math.sin(midRad) * labelDist;
 
+          const boxW = 104;
+          const boxH = 26;
           ctx.save();
-          ctx.fillStyle = 'rgba(9, 13, 22, 0.88)';
-          ctx.fillRect(lx - 45, ly - 10, 90, 20);
-          ctx.strokeStyle = `${zone.color}66`;
-          ctx.lineWidth = 1;
-          ctx.strokeRect(lx - 45, ly - 10, 90, 20);
+          ctx.fillStyle = 'rgba(9, 13, 22, 0.92)';
+          if (ctx.roundRect) {
+            ctx.roundRect(lx - boxW / 2, ly - boxH / 2, boxW, boxH, 6);
+          } else {
+            ctx.rect(lx - boxW / 2, ly - boxH / 2, boxW, boxH);
+          }
+          ctx.fill();
+          ctx.strokeStyle = `${zone.color}99`;
+          ctx.lineWidth = 1.5;
+          ctx.stroke();
           ctx.restore();
 
-          ctx.font = '10px Inter, system-ui, sans-serif';
+          ctx.font = 'bold 12px Inter, system-ui, sans-serif';
           ctx.textAlign = 'center';
           ctx.textBaseline = 'middle';
           ctx.fillStyle = zone.color;
-          ctx.fillText(zone.name.toUpperCase(), lx, ly - 3);
+          ctx.fillText(zone.name.toUpperCase(), lx, ly - 5);
 
-          ctx.font = '8px monospace';
-          ctx.fillStyle = 'rgba(255, 255, 255, 0.65)';
-          ctx.fillText(`${zone.min_angle_deg}°..${zone.max_angle_deg}°`, lx, ly + 8);
+          ctx.font = 'bold 10px monospace';
+          ctx.fillStyle = '#f1f5f9';
+          ctx.fillText(`${zone.min_angle_deg}°..${zone.max_angle_deg}°`, lx, ly + 6);
         }
       }
 
-      // 4. Draw ESP32 Planar Mic Array Pod at Table Center
+      // 5. Draw ESP32 Planar Mic Array Pod at Table Center
       ctx.beginPath();
       ctx.arc(centerX, centerY, 14, 0, Math.PI * 2);
       ctx.fillStyle = '#0f172a';
@@ -557,17 +580,20 @@ export const SmartRoomDirectorCanvas: React.FC<SmartRoomDirectorCanvasProps> = (
         ctx.fill();
       }
 
-      ctx.font = '8px Inter, sans-serif';
-      ctx.fillStyle = '#94a3b8';
+      ctx.font = 'bold 9px Inter, system-ui, sans-serif';
+      ctx.fillStyle = '#cbd5e1';
       ctx.textAlign = 'center';
       ctx.fillText('DOA ARRAY', centerX, centerY + 22);
 
-      // 5. Interactive Table Resize Corner Handle
-      const handleX = tableX + tableWidth;
-      const handleY = tableY + tableHeight;
+      // 6. Interactive Table Resize Corner Handle
+      const isRound = layout.tableShape === 'round';
+      const roundR = Math.min(tableWidth, tableHeight) * 0.48;
+      const handleX = isRound ? centerX + roundR * Math.cos(Math.PI / 4) : tableX + tableWidth;
+      const handleY = isRound ? centerY + roundR * Math.sin(Math.PI / 4) : tableY + tableHeight;
+
       ctx.beginPath();
       ctx.arc(handleX, handleY, 8, 0, Math.PI * 2);
-      ctx.fillStyle = isResizingTableRef.current ? '#10b981' : '#334155';
+      ctx.fillStyle = isResizingTableRef.current ? '#10b981' : isHoveringResize ? '#38bdf8' : '#334155';
       ctx.fill();
       ctx.strokeStyle = '#64748b';
       ctx.lineWidth = 1.5;
@@ -722,24 +748,35 @@ export const SmartRoomDirectorCanvas: React.FC<SmartRoomDirectorCanvasProps> = (
         ctx.stroke();
         ctx.restore();
 
-        // Camera Label with Protected Background (Deconfliction)
-        const labelY = cam.yRatio < 0.15 ? camY - 18 : camY + 22;
+        // Camera Label with Protected Background (Deconfliction & High Legibility)
+        const labelY = cam.yRatio < 0.15 ? camY - 22 : camY + 24;
         const pillText = isLive ? `${cam.name} [ON AIR]` : cam.name.split(' ')[0];
 
         ctx.save();
-        ctx.font = '8px Inter, sans-serif';
-        const textWidth = ctx.measureText(pillText).width;
-        ctx.fillStyle = isLive ? 'rgba(16, 185, 129, 0.85)' : 'rgba(15, 23, 42, 0.85)';
+        ctx.font = '600 11px Inter, system-ui, sans-serif';
+        const textMetrics = ctx.measureText(pillText);
+        const textWidth = textMetrics.width;
+        const pillH = 18;
+        const pillW = textWidth + 16;
+        const pillX = camX - pillW / 2;
+        const pillY = labelY - pillH / 2;
+
+        ctx.fillStyle = isLive ? 'rgba(16, 185, 129, 0.95)' : 'rgba(15, 23, 42, 0.9)';
         if (ctx.roundRect) {
-          ctx.roundRect(camX - textWidth / 2 - 4, labelY - 8, textWidth + 8, 13, 4);
+          ctx.roundRect(pillX, pillY, pillW, pillH, 5);
         } else {
-          ctx.rect(camX - textWidth / 2 - 4, labelY - 8, textWidth + 8, 13);
+          ctx.rect(pillX, pillY, pillW, pillH);
         }
         ctx.fill();
 
-        ctx.fillStyle = isLive ? '#022c22' : '#94a3b8';
+        ctx.strokeStyle = isLive ? '#34d399' : '#334155';
+        ctx.lineWidth = 1;
+        ctx.stroke();
+
+        ctx.fillStyle = isLive ? '#022c22' : '#f1f5f9';
         ctx.textAlign = 'center';
-        ctx.fillText(pillText, camX, labelY + 2);
+        ctx.textBaseline = 'middle';
+        ctx.fillText(pillText, camX, labelY);
         ctx.restore();
 
         // Pulsing "ON AIR" Halo
@@ -805,20 +842,20 @@ export const SmartRoomDirectorCanvas: React.FC<SmartRoomDirectorCanvasProps> = (
         ctx.lineTo(sx + reticleSize, sy + reticleSize - 6);
         ctx.stroke();
 
-        ctx.font = '8px Inter, sans-serif';
-        ctx.fillStyle = '#f59e0b';
+        ctx.font = 'bold 9px Inter, system-ui, sans-serif';
+        ctx.fillStyle = '#fbbf24';
         ctx.textAlign = 'center';
-        ctx.fillText('DIRECTOR FRAMED', sx, sy - reticleSize - 4);
+        ctx.fillText('DIRECTOR FRAMED', sx, sy - reticleSize - 5);
 
         // Speaker label tag
-        ctx.font = '9px Inter, system-ui, sans-serif';
+        ctx.font = 'bold 12px Inter, system-ui, sans-serif';
         ctx.fillStyle = '#ffffff';
         ctx.textAlign = 'center';
-        ctx.fillText(spk.slotId === 0 ? 'Speaker 1' : 'Speaker 2', sx, sy + 22);
+        ctx.fillText(spk.slotId === 0 ? 'Speaker 1' : 'Speaker 2', sx, sy + 24);
 
-        ctx.font = '8px monospace';
-        ctx.fillStyle = color;
-        ctx.fillText(`${Math.round(spk.splDb)} dB | ${Math.round(spk.angleDeg)}°`, sx, sy + 32);
+        ctx.font = 'bold 10px monospace';
+        ctx.fillStyle = spk.slotId === 0 ? '#34d399' : '#a5b4fc';
+        ctx.fillText(`${Math.round(spk.splDb)} dB | ${Math.round(spk.angleDeg)}°`, sx, sy + 36);
       }
 
       ctx.restore();
@@ -839,7 +876,7 @@ export const SmartRoomDirectorCanvas: React.FC<SmartRoomDirectorCanvasProps> = (
     { id: 'hollow_square', label: 'Square' },
   ];
 
-  const cursorClass = isHoveringCamera
+  const cursorClass = isHoveringCamera || hoveringChairId
     ? 'cursor-grab active:cursor-grabbing'
     : isHoveringResize
     ? 'cursor-nwse-resize'
@@ -882,7 +919,7 @@ export const SmartRoomDirectorCanvas: React.FC<SmartRoomDirectorCanvasProps> = (
             {shapeOptions.map((opt) => (
               <button
                 key={opt.id}
-                onClick={() => onUpdateRoomLayout({ tableShape: opt.id })}
+                onClick={() => onUpdateRoomLayout({ tableShape: opt.id, customChairs: undefined })}
                 className={`px-2 py-1 rounded font-medium capitalize transition ${
                   roomLayout.tableShape === opt.id
                     ? 'bg-emerald-600 text-slate-950 font-bold shadow'
@@ -902,11 +939,11 @@ export const SmartRoomDirectorCanvas: React.FC<SmartRoomDirectorCanvasProps> = (
                 ? 'bg-slate-800 text-emerald-400 border-slate-700'
                 : 'bg-slate-900 text-slate-300 border-slate-800 hover:border-slate-700'
             }`}
-            title="Adjust table dimensions and seating layout"
+            title="Adjust table dimensions, seating layout, and chairs"
           >
             <Maximize2 className="w-3 h-3 text-cyan-400" />
             <span className="font-mono text-[10px]">
-              {Math.round(roomLayout.tableWidthRatio * 100)}%×{Math.round(roomLayout.tableHeightRatio * 100)}%
+              W {Math.round(roomLayout.tableWidthRatio * 100)}% × L {Math.round(roomLayout.tableHeightRatio * 100)}%
             </span>
             {isTableSettingsOpen ? (
               <ChevronUp className="w-3 h-3" />
@@ -941,7 +978,7 @@ export const SmartRoomDirectorCanvas: React.FC<SmartRoomDirectorCanvasProps> = (
         </div>
       </div>
 
-      {/* Expandable Table Dimensions Settings Card */}
+      {/* Expandable Table Dimensions & Chair Seating Settings Card */}
       {isTableSettingsOpen && (
         <div className="bg-slate-950 border-b border-slate-800 px-5 py-3 text-xs grid grid-cols-1 sm:grid-cols-4 gap-4 items-center">
           {/* Width Slider */}
@@ -965,10 +1002,10 @@ export const SmartRoomDirectorCanvas: React.FC<SmartRoomDirectorCanvasProps> = (
             />
           </div>
 
-          {/* Height Slider */}
+          {/* Length Slider (Renamed from Table Height) */}
           <div className="space-y-1">
             <div className="flex justify-between text-slate-400 text-[11px]">
-              <span>Table Height:</span>
+              <span>Table Length:</span>
               <span className="font-mono text-cyan-400 font-bold">
                 {Math.round(roomLayout.tableHeightRatio * 100)}%
               </span>
@@ -986,65 +1023,84 @@ export const SmartRoomDirectorCanvas: React.FC<SmartRoomDirectorCanvasProps> = (
             />
           </div>
 
-          {/* Seat Count Slider */}
+          {/* Seat Count Slider (min 2, max 16, step 1) */}
           <div className="space-y-1">
             <div className="flex justify-between text-slate-400 text-[11px]">
               <span>Participant Seats:</span>
               <span className="font-mono text-indigo-400 font-bold">
                 {roomLayout.seatCount || 8} Chairs
+                {roomLayout.customChairs ? ' (Custom)' : ''}
               </span>
             </div>
             <input
               type="range"
-              min={4}
+              min={2}
               max={16}
-              step={2}
+              step={1}
               value={roomLayout.seatCount || 8}
-              onChange={(e) => onUpdateRoomLayout({ seatCount: Number(e.target.value) })}
+              onChange={(e) =>
+                onUpdateRoomLayout({
+                  seatCount: Number(e.target.value),
+                  customChairs: undefined,
+                })
+              }
               className="w-full accent-indigo-500 cursor-pointer"
             />
           </div>
 
-          {/* Presets & Reset */}
-          <div className="flex items-center space-x-1.5 pt-2 sm:pt-0 sm:justify-end">
+          {/* Presets, Reset & Auto-Arrange Chairs */}
+          <div className="flex flex-wrap items-center gap-1.5 pt-2 sm:pt-0 sm:justify-end">
             <button
-              onClick={() =>
+              onClick={() => onUpdateRoomLayout({ customChairs: undefined })}
+              className="px-2 py-1 rounded bg-slate-900 hover:bg-slate-800 text-indigo-300 text-[10px] border border-indigo-900/60 hover:border-indigo-700 transition"
+              title="Reset chair placements back to default symmetry"
+            >
+              Auto-Arrange Chairs
+            </button>
+            <button
+              onClick={() => {
+                const isRound = roomLayout.tableShape === 'round';
                 onUpdateRoomLayout({
-                  tableWidthRatio: 0.42,
-                  tableHeightRatio: 0.26,
-                  seatCount: 6,
-                })
-              }
+                  tableWidthRatio: isRound ? 0.44 : 0.42,
+                  tableHeightRatio: isRound ? 0.44 : 0.26,
+                  seatCount: isRound ? 6 : 6,
+                  customChairs: undefined,
+                });
+              }}
               className="px-2 py-1 rounded bg-slate-900 hover:bg-slate-800 text-slate-300 text-[10px] border border-slate-800 transition"
             >
               Compact
             </button>
             <button
-              onClick={() =>
+              onClick={() => {
+                const isRound = roomLayout.tableShape === 'round';
                 onUpdateRoomLayout({
-                  tableWidthRatio: 0.52,
-                  tableHeightRatio: 0.32,
+                  tableWidthRatio: isRound ? 0.54 : 0.52,
+                  tableHeightRatio: isRound ? 0.54 : 0.32,
                   seatCount: 8,
-                })
-              }
+                  customChairs: undefined,
+                });
+              }}
               className="px-2 py-1 rounded bg-slate-900 hover:bg-slate-800 text-slate-300 text-[10px] border border-slate-800 transition"
             >
               Standard
             </button>
             <button
-              onClick={() =>
+              onClick={() => {
+                const isRound = roomLayout.tableShape === 'round';
                 onUpdateRoomLayout({
-                  tableWidthRatio: 0.66,
-                  tableHeightRatio: 0.36,
+                  tableWidthRatio: isRound ? 0.64 : 0.66,
+                  tableHeightRatio: isRound ? 0.64 : 0.36,
                   seatCount: 12,
-                })
-              }
+                  customChairs: undefined,
+                });
+              }}
               className="px-2 py-1 rounded bg-slate-900 hover:bg-slate-800 text-slate-300 text-[10px] border border-slate-800 transition"
             >
               Executive
             </button>
             <button
-              onClick={() => onUpdateRoomLayout(DEFAULT_ROOM_LAYOUT)}
+              onClick={() => onUpdateRoomLayout({ ...DEFAULT_ROOM_LAYOUT, customChairs: undefined })}
               className="p-1 rounded bg-slate-900 hover:bg-slate-800 text-slate-400 hover:text-slate-200 border border-slate-800 transition"
               title="Reset to default table dimensions"
             >
@@ -1065,14 +1121,18 @@ export const SmartRoomDirectorCanvas: React.FC<SmartRoomDirectorCanvasProps> = (
           className={`w-full h-full block ${cursorClass}`}
         />
         {/* Interactive Hints Overlay */}
-        <div className="absolute top-2 left-3 flex items-center space-x-2 pointer-events-none">
+        <div className="absolute top-2 left-3 flex flex-wrap items-center gap-2 pointer-events-none">
           <div className="px-2 py-1 rounded bg-slate-950/80 border border-slate-800 text-[10px] text-slate-400 flex items-center space-x-1 backdrop-blur-sm">
             <Move className="w-3 h-3 text-cyan-400" />
-            <span>Drag cameras along walls</span>
+            <span>Drag cameras</span>
+          </div>
+          <div className="px-2 py-1 rounded bg-slate-950/80 border border-slate-800 text-[10px] text-slate-400 flex items-center space-x-1 backdrop-blur-sm">
+            <Move className="w-3 h-3 text-indigo-400" />
+            <span>Drag chairs to rearrange</span>
           </div>
           <div className="px-2 py-1 rounded bg-slate-950/80 border border-slate-800 text-[10px] text-slate-400 flex items-center space-x-1 backdrop-blur-sm">
             <Maximize2 className="w-3 h-3 text-emerald-400" />
-            <span>Drag table corner handle to resize</span>
+            <span>Drag handle to resize</span>
           </div>
         </div>
       </div>

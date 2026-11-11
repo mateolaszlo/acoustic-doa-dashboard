@@ -181,11 +181,18 @@ export interface MultipathMetrics {
 
 export type TableShapeType = 'oval' | 'round' | 'ushape' | 'hollow_square';
 
+export interface CustomChair {
+  id: string;
+  xRatio: number; // 0..1 relative to canvas width
+  yRatio: number; // 0..1 relative to canvas height
+}
+
 export interface RoomLayoutConfig {
   tableShape: TableShapeType;
   tableWidthRatio: number; // 0.3 .. 0.8
-  tableHeightRatio: number; // 0.2 .. 0.6
-  seatCount: number; // 4 .. 12
+  tableHeightRatio: number; // 0.2 .. 0.6 (Length)
+  seatCount: number; // 2 .. 16
+  customChairs?: CustomChair[];
   speaker1SeatAngleDeg?: number;
   speaker2SeatAngleDeg?: number;
 }
