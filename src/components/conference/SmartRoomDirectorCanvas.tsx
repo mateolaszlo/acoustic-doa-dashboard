@@ -1,11 +1,19 @@
-import React, { useRef, useEffect, useState } from 'react';
-import { AcousticTrack, MeasurementEvent, SpatialZone, VirtualCamera } from '../../types/api_types';
+import React, { useRef, useEffect, useState, useCallback } from 'react';
+import {
+  AcousticTrack,
+  MeasurementEvent,
+  SpatialZone,
+  VirtualCamera,
+  RoomLayoutConfig,
+  TableShapeType,
+} from '../../types/api_types';
 import {
   computeCameraFovPoints,
   resolveSpatialZone,
   calculateSpeakerWorldPos,
 } from '../../services/camera_ptz_math';
-import { Camera, Radio, Eye, EyeOff, Sliders } from 'lucide-react';
+import { ActiveSpeakerTarget } from '../../hooks/useMultiCameraDirector';
+import { Camera, Radio, Eye, EyeOff, Sliders, Layout, Move } from 'lucide-react';
 
 interface SmartRoomDirectorCanvasProps {
   activeTracks?: AcousticTrack[];
@@ -13,9 +21,11 @@ interface SmartRoomDirectorCanvasProps {
   zones: SpatialZone[];
   cameras: VirtualCamera[];
   liveCamId: string;
+  roomLayout: RoomLayoutConfig;
+  onUpdateRoomLayout: (partial: Partial<RoomLayoutConfig>) => void;
+  onUpdateCamera: (id: string, partial: Partial<VirtualCamera>) => void;
   onProcessFrame: (
-    speakerPos: { x: number; y: number } | null,
-    speakerAngleDeg: number | null,
+    speakers: ActiveSpeakerTarget[],
     roomWidth: number,
     roomHeight: number,
     dtSec: number
@@ -30,17 +40,22 @@ export const SmartRoomDirectorCanvas: React.FC<SmartRoomDirectorCanvasProps> = (
   zones = [],
   cameras = [],
   liveCamId,
+  roomLayout,
+  onUpdateRoomLayout,
+  onUpdateCamera,
   onProcessFrame,
   onSelectManualLiveCam,
   onOpenStudioSettings,
 }) => {
   const canvasRef = useRef<HTMLCanvasElement | null>(null);
   const lastTimeRef = useRef<number>(performance.now());
+  const draggingCamIdRef = useRef<string | null>(null);
 
   // Component UI State
   const [showZones, setShowZones] = useState(true);
-  const [cameraStatus, setCameraStatus] = useState<string>('IDLE / SCANNING');
+  const [cameraStatus, setCameraStatus] = useState<string>('IDLE • MULTI-CAMERA STANDBY');
   const [activeZoneName, setActiveZoneName] = useState<string>('None');
+  const [isHoveringCamera, setIsHoveringCamera] = useState(false);
 
   const showZonesRef = useRef<boolean>(showZones);
   showZonesRef.current = showZones;
@@ -60,8 +75,59 @@ export const SmartRoomDirectorCanvas: React.FC<SmartRoomDirectorCanvasProps> = (
   const liveCamIdRef = useRef(liveCamId);
   liveCamIdRef.current = liveCamId;
 
+  const roomLayoutRef = useRef(roomLayout);
+  roomLayoutRef.current = roomLayout;
+
   const onProcessFrameRef = useRef(onProcessFrame);
   onProcessFrameRef.current = onProcessFrame;
+
+  // Mouse interaction handlers for direct camera drag-and-drop
+  const handleMouseDown = useCallback((e: React.MouseEvent<HTMLCanvasElement>) => {
+    const canvas = canvasRef.current;
+    if (!canvas) return;
+    const rect = canvas.getBoundingClientRect();
+    const mouseX = e.clientX - rect.left;
+    const mouseY = e.clientY - rect.top;
+
+    for (const cam of camerasRef.current) {
+      const camX = cam.xRatio * rect.width;
+      const camY = cam.yRatio * rect.height;
+      if (Math.hypot(mouseX - camX, mouseY - camY) < 22) {
+        draggingCamIdRef.current = cam.id;
+        return;
+      }
+    }
+  }, []);
+
+  const handleMouseMove = useCallback((e: React.MouseEvent<HTMLCanvasElement>) => {
+    const canvas = canvasRef.current;
+    if (!canvas) return;
+    const rect = canvas.getBoundingClientRect();
+    const mouseX = e.clientX - rect.left;
+    const mouseY = e.clientY - rect.top;
+
+    if (draggingCamIdRef.current) {
+      const xRatio = Math.max(0.04, Math.min(0.96, mouseX / rect.width));
+      const yRatio = Math.max(0.04, Math.min(0.96, mouseY / rect.height));
+      onUpdateCamera(draggingCamIdRef.current, { xRatio, yRatio });
+    } else {
+      // Check hover for cursor styling
+      let hovering = false;
+      for (const cam of camerasRef.current) {
+        const camX = cam.xRatio * rect.width;
+        const camY = cam.yRatio * rect.height;
+        if (Math.hypot(mouseX - camX, mouseY - camY) < 20) {
+          hovering = true;
+          break;
+        }
+      }
+      setIsHoveringCamera(hovering);
+    }
+  }, [onUpdateCamera]);
+
+  const handleMouseUp = useCallback(() => {
+    draggingCamIdRef.current = null;
+  }, []);
 
   useEffect(() => {
     const canvas = canvasRef.current;
@@ -91,9 +157,10 @@ export const SmartRoomDirectorCanvas: React.FC<SmartRoomDirectorCanvasProps> = (
 
       const centerX = width / 2;
       const centerY = height / 2 + 10;
-      const tableWidth = width * 0.52;
-      const tableHeight = height * 0.32;
-      const tableRadiusPx = tableWidth * 0.44;
+      const layout = roomLayoutRef.current;
+      const tableWidth = width * layout.tableWidthRatio;
+      const tableHeight = height * layout.tableHeightRatio;
+      const tableRadiusPx = Math.min(tableWidth, tableHeight) * 0.48;
 
       // 1. Draw Conference Room Floor & Grid
       ctx.fillStyle = '#090d16';
@@ -120,9 +187,9 @@ export const SmartRoomDirectorCanvas: React.FC<SmartRoomDirectorCanvasProps> = (
         ctx.stroke();
       }
 
-      // 2. Draw Geofenced Spatial Zones
+      // 2. Draw Geofenced Spatial Zones (Positioned cleanly away from wall cameras)
       if (showZonesRef.current && zonesRef.current.length > 0) {
-        const zoneRadius = Math.min(width, height) * 0.44;
+        const zoneRadius = Math.min(width, height) * 0.42;
         for (const zone of zonesRef.current) {
           const startRad = ((zone.min_angle_deg - 90) * Math.PI) / 180;
           const endRad = ((zone.max_angle_deg - 90) * Math.PI) / 180;
@@ -132,7 +199,7 @@ export const SmartRoomDirectorCanvas: React.FC<SmartRoomDirectorCanvasProps> = (
           ctx.moveTo(centerX, centerY);
           ctx.arc(centerX, centerY, zoneRadius, startRad, endRad);
           ctx.closePath();
-          ctx.fillStyle = `${zone.color}15`;
+          ctx.fillStyle = `${zone.color}12`;
           ctx.fill();
 
           // Sector boundary arc
@@ -154,64 +221,136 @@ export const SmartRoomDirectorCanvas: React.FC<SmartRoomDirectorCanvasProps> = (
           ctx.lineWidth = 1;
           ctx.stroke();
 
-          // Zone text label
+          // Zone text label (Offset radially to avoid colliding with top/bottom wall cameras)
           const midAngleDeg = (zone.min_angle_deg + zone.max_angle_deg) / 2;
           const midRad = ((midAngleDeg - 90) * Math.PI) / 180;
-          const labelDist = zoneRadius * 0.82;
+          const labelDist = zoneRadius * 0.68;
           const lx = centerX + Math.cos(midRad) * labelDist;
           const ly = centerY + Math.sin(midRad) * labelDist;
+
+          ctx.save();
+          ctx.fillStyle = 'rgba(9, 13, 22, 0.75)';
+          ctx.fillRect(lx - 45, ly - 10, 90, 20);
+          ctx.restore();
 
           ctx.font = '10px Inter, system-ui, sans-serif';
           ctx.textAlign = 'center';
           ctx.textBaseline = 'middle';
           ctx.fillStyle = zone.color;
-          ctx.fillText(zone.name.toUpperCase(), lx, ly);
+          ctx.fillText(zone.name.toUpperCase(), lx, ly - 3);
 
           ctx.font = '8px monospace';
-          ctx.fillStyle = 'rgba(255, 255, 255, 0.4)';
-          ctx.fillText(`${zone.min_angle_deg}°..${zone.max_angle_deg}°`, lx, ly + 11);
+          ctx.fillStyle = 'rgba(255, 255, 255, 0.45)';
+          ctx.fillText(`${zone.min_angle_deg}°..${zone.max_angle_deg}°`, lx, ly + 8);
         }
       }
 
-      // 3. Draw Conference Table in Room Center
+      // 3. Draw Conference Table based on Selected Table Shape
       const tableX = centerX - tableWidth / 2;
       const tableY = centerY - tableHeight / 2;
-      const radius = 24;
+      const chairColor = '#475569';
+      const chairRadius = 4.5;
 
       ctx.shadowColor = 'rgba(0, 0, 0, 0.6)';
       ctx.shadowBlur = 16;
       ctx.shadowOffsetY = 6;
-      ctx.beginPath();
-      ctx.roundRect(tableX, tableY, tableWidth, tableHeight, radius);
-      ctx.fillStyle = '#1e293b';
-      ctx.fill();
-      ctx.shadowBlur = 0;
-      ctx.shadowOffsetY = 0;
 
-      ctx.strokeStyle = '#334155';
-      ctx.lineWidth = 2;
-      ctx.stroke();
-
-      // Chairs around table
-      const chairColor = '#475569';
-      const chairRadius = 4;
-      const chairOffsets = [-tableWidth * 0.3, 0, tableWidth * 0.3];
-      for (const off of chairOffsets) {
+      if (layout.tableShape === 'oval') {
+        // Boardroom Oval Table
         ctx.beginPath();
-        ctx.arc(centerX + off, tableY - 10, chairRadius, 0, Math.PI * 2);
+        ctx.roundRect(tableX, tableY, tableWidth, tableHeight, 26);
+        ctx.fillStyle = '#1e293b';
+        ctx.fill();
+        ctx.shadowBlur = 0;
+        ctx.shadowOffsetY = 0;
+        ctx.strokeStyle = '#334155';
+        ctx.lineWidth = 2;
+        ctx.stroke();
+
+        // Seating chairs around oval
+        const xOffsets = [-tableWidth * 0.32, 0, tableWidth * 0.32];
+        for (const off of xOffsets) {
+          ctx.beginPath();
+          ctx.arc(centerX + off, tableY - 11, chairRadius, 0, Math.PI * 2);
+          ctx.arc(centerX + off, tableY + tableHeight + 11, chairRadius, 0, Math.PI * 2);
+          ctx.fillStyle = chairColor;
+          ctx.fill();
+        }
+        ctx.beginPath();
+        ctx.arc(tableX - 11, centerY, chairRadius, 0, Math.PI * 2);
+        ctx.arc(tableX + tableWidth + 11, centerY, chairRadius, 0, Math.PI * 2);
         ctx.fillStyle = chairColor;
         ctx.fill();
-
+      } else if (layout.tableShape === 'round') {
+        // Roundtable Circle Table
+        const r = Math.min(tableWidth, tableHeight) * 0.44;
         ctx.beginPath();
-        ctx.arc(centerX + off, tableY + tableHeight + 10, chairRadius, 0, Math.PI * 2);
+        ctx.arc(centerX, centerY, r, 0, Math.PI * 2);
+        ctx.fillStyle = '#1e293b';
+        ctx.fill();
+        ctx.shadowBlur = 0;
+        ctx.shadowOffsetY = 0;
+        ctx.strokeStyle = '#334155';
+        ctx.lineWidth = 2;
+        ctx.stroke();
+
+        // Radial chairs around circle
+        const seats = layout.seatCount || 8;
+        for (let i = 0; i < seats; i++) {
+          const ang = (i / seats) * Math.PI * 2 - Math.PI / 2;
+          ctx.beginPath();
+          ctx.arc(centerX + Math.cos(ang) * (r + 12), centerY + Math.sin(ang) * (r + 12), chairRadius, 0, Math.PI * 2);
+          ctx.fillStyle = chairColor;
+          ctx.fill();
+        }
+      } else if (layout.tableShape === 'ushape') {
+        // U-Shape Auditorium Table (Open North towards Stage)
+        const wallThick = 26;
+        ctx.beginPath();
+        ctx.moveTo(tableX, tableY);
+        ctx.lineTo(tableX + wallThick, tableY);
+        ctx.lineTo(tableX + wallThick, tableY + tableHeight - wallThick);
+        ctx.lineTo(tableX + tableWidth - wallThick, tableY + tableHeight - wallThick);
+        ctx.lineTo(tableX + tableWidth - wallThick, tableY);
+        ctx.lineTo(tableX + tableWidth, tableY);
+        ctx.lineTo(tableX + tableWidth, tableY + tableHeight);
+        ctx.lineTo(tableX, tableY + tableHeight);
+        ctx.closePath();
+        ctx.fillStyle = '#1e293b';
+        ctx.fill();
+        ctx.shadowBlur = 0;
+        ctx.shadowOffsetY = 0;
+        ctx.strokeStyle = '#334155';
+        ctx.lineWidth = 2;
+        ctx.stroke();
+
+        // Chairs on outer boundary
+        ctx.beginPath();
+        ctx.arc(tableX - 11, centerY - 20, chairRadius, 0, Math.PI * 2);
+        ctx.arc(tableX - 11, centerY + 20, chairRadius, 0, Math.PI * 2);
+        ctx.arc(tableX + tableWidth + 11, centerY - 20, chairRadius, 0, Math.PI * 2);
+        ctx.arc(tableX + tableWidth + 11, centerY + 20, chairRadius, 0, Math.PI * 2);
+        ctx.arc(centerX - 35, tableY + tableHeight + 11, chairRadius, 0, Math.PI * 2);
+        ctx.arc(centerX + 35, tableY + tableHeight + 11, chairRadius, 0, Math.PI * 2);
         ctx.fillStyle = chairColor;
         ctx.fill();
+      } else {
+        // Hollow Square
+        const wallThick = 24;
+        ctx.beginPath();
+        ctx.rect(tableX, tableY, tableWidth, tableHeight);
+        ctx.fillStyle = '#1e293b';
+        ctx.fill();
+        ctx.shadowBlur = 0;
+        ctx.shadowOffsetY = 0;
+        ctx.strokeStyle = '#334155';
+        ctx.lineWidth = 2;
+        ctx.stroke();
+
+        ctx.fillStyle = '#090d16';
+        ctx.fillRect(tableX + wallThick, tableY + wallThick, tableWidth - wallThick * 2, tableHeight - wallThick * 2);
+        ctx.strokeRect(tableX + wallThick, tableY + wallThick, tableWidth - wallThick * 2, tableHeight - wallThick * 2);
       }
-      ctx.beginPath();
-      ctx.arc(tableX - 10, centerY, chairRadius, 0, Math.PI * 2);
-      ctx.arc(tableX + tableWidth + 10, centerY, chairRadius, 0, Math.PI * 2);
-      ctx.fillStyle = chairColor;
-      ctx.fill();
 
       // 4. Draw ESP32 Planar Mic Array Pod at Table Center
       ctx.beginPath();
@@ -245,59 +384,74 @@ export const SmartRoomDirectorCanvas: React.FC<SmartRoomDirectorCanvasProps> = (
       ctx.textAlign = 'center';
       ctx.fillText('DOA ARRAY', centerX, centerY + 22);
 
-      // 5. Determine Active Speaker & World Coordinates
+      // 5. Build Active Speaker Targets for Broadcast Director
       const tracks = activeTracksRef.current;
-      const primaryTrack = tracks.find((t) => t.trackSlot === 0 && t.state === 'ACTIVE');
-      const secondaryTrack = tracks.find((t) => t.trackSlot === 1 && t.state === 'ACTIVE');
-      const activeSpeakerTrack = primaryTrack || secondaryTrack || tracks.find((t) => t.state === 'ACTIVE');
+      const speakerTargets: ActiveSpeakerTarget[] = [];
 
-      let activeSpeakerPos: { x: number; y: number } | null = null;
-      let activeSpeakerAngle: number | null = null;
-      let activeSpeakerSlot = 0;
-      let activeSpeakerSpl = 0;
+      const track0 = tracks.find((t) => t.trackSlot === 0 && t.state === 'ACTIVE');
+      const track1 = tracks.find((t) => t.trackSlot === 1 && t.state === 'ACTIVE');
 
-      if (activeSpeakerTrack) {
-        activeSpeakerAngle = activeSpeakerTrack.angleDeg;
-        activeSpeakerSlot = activeSpeakerTrack.trackSlot;
-        activeSpeakerSpl = activeSpeakerTrack.soundLevelDb;
-        activeSpeakerPos = calculateSpeakerWorldPos(centerX, centerY, activeSpeakerAngle, tableRadiusPx);
+      let resolvedZone = 'Unassigned';
 
-        const zoneObj = resolveSpatialZone(activeSpeakerAngle, zonesRef.current);
-        const zoneName = zoneObj ? zoneObj.name : 'Unassigned';
-        setActiveZoneName(zoneName);
-      } else if (latestEventsRef.current.length > 0) {
+      if (track0) {
+        const pos0 = calculateSpeakerWorldPos(centerX, centerY, track0.angleDeg, tableRadiusPx);
+        speakerTargets.push({
+          slotId: 0,
+          pos: pos0,
+          angleDeg: track0.angleDeg,
+          isActive: true,
+          splDb: track0.soundLevelDb,
+        });
+        const z0 = resolveSpatialZone(track0.angleDeg, zonesRef.current);
+        if (z0) resolvedZone = z0.name;
+      }
+
+      if (track1) {
+        const pos1 = calculateSpeakerWorldPos(centerX, centerY, track1.angleDeg, tableRadiusPx);
+        speakerTargets.push({
+          slotId: 1,
+          pos: pos1,
+          angleDeg: track1.angleDeg,
+          isActive: true,
+          splDb: track1.soundLevelDb,
+        });
+        const z1 = resolveSpatialZone(track1.angleDeg, zonesRef.current);
+        if (z1) resolvedZone = z1.name;
+      }
+
+      // Fallback: If no tracks exist, inspect recent event
+      if (speakerTargets.length === 0 && latestEventsRef.current.length > 0) {
         const latest = latestEventsRef.current[latestEventsRef.current.length - 1];
-        if (Date.now() - latest.timestampMs < 1500 && latest.soundLevelDb >= 52) {
-          activeSpeakerAngle = latest.angleDeg;
-          activeSpeakerSlot = latest.slotId ?? 0;
-          activeSpeakerSpl = latest.soundLevelDb;
-          activeSpeakerPos = calculateSpeakerWorldPos(centerX, centerY, activeSpeakerAngle, tableRadiusPx);
-
-          const zoneObj = resolveSpatialZone(activeSpeakerAngle, zonesRef.current);
-          const zoneName = zoneObj ? zoneObj.name : 'Unassigned';
-          setActiveZoneName(zoneName);
+        if (Date.now() - latest.timestampMs < 1600 && latest.soundLevelDb >= 50) {
+          const slot = latest.slotId ?? 0;
+          const pos = calculateSpeakerWorldPos(centerX, centerY, latest.angleDeg, tableRadiusPx);
+          speakerTargets.push({
+            slotId: slot,
+            pos,
+            angleDeg: latest.angleDeg,
+            isActive: true,
+            splDb: latest.soundLevelDb,
+          });
+          const z = resolveSpatialZone(latest.angleDeg, zonesRef.current);
+          if (z) resolvedZone = z.name;
         }
       }
 
-      // 6. Process Multi-Camera Director Frame (Trigonometric Parallax + Schmitt Hysteresis)
-      const { activeCamera } = onProcessFrameRef.current(
-        activeSpeakerPos,
-        activeSpeakerAngle,
-        width,
-        height,
-        dt
-      );
+      setActiveZoneName(resolvedZone);
 
-      if (activeCamera && activeSpeakerPos !== null) {
+      // 6. Process Multi-Camera Broadcast Assignment & Sticky Memory
+      const { activeCamera } = onProcessFrameRef.current(speakerTargets, width, height, dt);
+
+      if (activeCamera && speakerTargets.some((s) => s.isActive)) {
         const aimDeg = Math.round(activeCamera.currentPanDeg);
         setCameraStatus(
-          `[LIVE: ${activeCamera.name.toUpperCase()}] AIM: ${aimDeg > 0 ? '+' : ''}${aimDeg}° -> ${activeZoneName.toUpperCase()}`
+          `[LIVE: ${activeCamera.name.toUpperCase()}] AIM: ${aimDeg > 0 ? '+' : ''}${aimDeg}° -> ${resolvedZone.toUpperCase()}`
         );
       } else {
         setCameraStatus('IDLE • MULTI-CAMERA STANDBY');
       }
 
-      // 7. Render All Virtual Cameras (Frustums, Lasers, Tally Lights)
+      // 7. Render All Virtual Cameras (Frustums, Cones, Tally Lights)
       const currentCams = camerasRef.current;
       for (const cam of currentCams) {
         const camX = cam.xRatio * width;
@@ -310,11 +464,12 @@ export const SmartRoomDirectorCanvas: React.FC<SmartRoomDirectorCanvasProps> = (
 
         const coneGrad = ctx.createRadialGradient(camX, camY, 15, camX, camY, coneRadius);
         if (isLive) {
-          coneGrad.addColorStop(0, `${cam.color}55`); // ~33% opacity
-          coneGrad.addColorStop(0.5, `${cam.color}20`); // ~12% opacity
+          coneGrad.addColorStop(0, `${cam.color}55`);
+          coneGrad.addColorStop(0.5, `${cam.color}20`);
           coneGrad.addColorStop(1, 'rgba(0, 0, 0, 0.0)');
         } else {
-          coneGrad.addColorStop(0, 'rgba(148, 163, 184, 0.08)');
+          // Standby camera: faint context cone
+          coneGrad.addColorStop(0, 'rgba(148, 163, 184, 0.07)');
           coneGrad.addColorStop(1, 'rgba(0, 0, 0, 0.0)');
         }
 
@@ -329,8 +484,7 @@ export const SmartRoomDirectorCanvas: React.FC<SmartRoomDirectorCanvasProps> = (
         ctx.fillStyle = coneGrad;
         ctx.fill();
 
-        // Cone outline
-        ctx.strokeStyle = isLive ? `${cam.color}99` : 'rgba(148, 163, 184, 0.25)';
+        ctx.strokeStyle = isLive ? `${cam.color}99` : 'rgba(148, 163, 184, 0.22)';
         ctx.lineWidth = isLive ? 1.5 : 1;
         ctx.setLineDash(isLive ? [] : [4, 4]);
         ctx.stroke();
@@ -367,7 +521,23 @@ export const SmartRoomDirectorCanvas: React.FC<SmartRoomDirectorCanvasProps> = (
         ctx.stroke();
         ctx.restore();
 
-        // "ON AIR" Live Tally Light Indicator
+        // Camera Label with Protected Background (Deconfliction)
+        const labelY = cam.yRatio < 0.15 ? camY - 18 : camY + 22;
+        const pillText = isLive ? `${cam.name} [ON AIR]` : cam.name.split(' ')[0];
+
+        ctx.save();
+        ctx.font = '8px Inter, sans-serif';
+        const textWidth = ctx.measureText(pillText).width;
+        ctx.fillStyle = isLive ? 'rgba(16, 185, 129, 0.85)' : 'rgba(15, 23, 42, 0.85)';
+        ctx.roundRect(camX - textWidth / 2 - 4, labelY - 8, textWidth + 8, 13, 4);
+        ctx.fill();
+
+        ctx.fillStyle = isLive ? '#022c22' : '#94a3b8';
+        ctx.textAlign = 'center';
+        ctx.fillText(pillText, camX, labelY + 2);
+        ctx.restore();
+
+        // Pulsing "ON AIR" Halo
         if (isLive) {
           const tallyPhase = (time % 1000) / 1000;
           ctx.beginPath();
@@ -375,25 +545,14 @@ export const SmartRoomDirectorCanvas: React.FC<SmartRoomDirectorCanvasProps> = (
           ctx.strokeStyle = `${cam.color}${Math.floor((1 - tallyPhase) * 180).toString(16).padStart(2, '0')}`;
           ctx.lineWidth = 1.5;
           ctx.stroke();
-
-          // Tally pill label
-          ctx.font = '8px Inter, sans-serif';
-          ctx.fillStyle = '#ffffff';
-          ctx.textAlign = 'center';
-          ctx.fillText('ON AIR', camX, camY + 22);
-        } else {
-          ctx.font = '8px Inter, sans-serif';
-          ctx.fillStyle = '#64748b';
-          ctx.textAlign = 'center';
-          ctx.fillText(cam.name.split(' ')[0], camX, camY + 22);
         }
       }
 
-      // 8. Draw Active Speaker Node & Framing Reticles
-      if (activeSpeakerPos !== null && activeSpeakerAngle !== null) {
-        const sx = activeSpeakerPos.x;
-        const sy = activeSpeakerPos.y;
-        const color = activeSpeakerSlot === 0 ? '#10b981' : '#818cf8';
+      // 8. Render Active Speakers & Framing Reticles
+      for (const spk of speakerTargets) {
+        const sx = spk.pos.x;
+        const sy = spk.pos.y;
+        const color = spk.slotId === 0 ? '#10b981' : '#818cf8';
 
         // Ripple pulse
         const ripplePhase = (time % 1200) / 1200;
@@ -418,7 +577,7 @@ export const SmartRoomDirectorCanvas: React.FC<SmartRoomDirectorCanvasProps> = (
         ctx.fillStyle = color;
         ctx.fill();
 
-        // Framing Reticle
+        // Framing Reticle around speaker
         const reticleSize = 18;
         ctx.strokeStyle = '#f59e0b';
         ctx.lineWidth = 1.5;
@@ -446,11 +605,11 @@ export const SmartRoomDirectorCanvas: React.FC<SmartRoomDirectorCanvasProps> = (
         ctx.font = '9px Inter, system-ui, sans-serif';
         ctx.fillStyle = '#ffffff';
         ctx.textAlign = 'center';
-        ctx.fillText(activeSpeakerSlot === 0 ? 'Speaker 1' : 'Speaker 2', sx, sy + 22);
+        ctx.fillText(spk.slotId === 0 ? 'Speaker 1' : 'Speaker 2', sx, sy + 22);
 
         ctx.font = '8px monospace';
         ctx.fillStyle = color;
-        ctx.fillText(`${Math.round(activeSpeakerSpl)} dB | ${Math.round(activeSpeakerAngle)}°`, sx, sy + 32);
+        ctx.fillText(`${Math.round(spk.splDb)} dB | ${Math.round(spk.angleDeg)}°`, sx, sy + 32);
       }
 
       ctx.restore();
@@ -467,7 +626,7 @@ export const SmartRoomDirectorCanvas: React.FC<SmartRoomDirectorCanvasProps> = (
   return (
     <div className="relative flex flex-col bg-slate-900 border border-slate-800 rounded-xl overflow-hidden shadow-2xl">
       {/* Top Canvas Header & Telemetry Bar */}
-      <div className="flex flex-wrap items-center justify-between px-4 py-3 bg-slate-950 border-b border-slate-800 text-xs">
+      <div className="flex flex-wrap items-center justify-between px-4 py-3 bg-slate-950 border-b border-slate-800 text-xs gap-2">
         <div className="flex items-center space-x-2">
           <Camera className="w-4 h-4 text-emerald-400 animate-pulse" />
           <span className="font-semibold text-slate-200 uppercase tracking-wider">
@@ -486,24 +645,28 @@ export const SmartRoomDirectorCanvas: React.FC<SmartRoomDirectorCanvasProps> = (
 
         {/* Interactive View Controls */}
         <div className="flex items-center space-x-2">
-          {/* Live Camera Quick Switcher */}
+          {/* Table Shape Switcher Toolbar */}
           <div className="flex items-center bg-slate-900 border border-slate-800 rounded-lg p-0.5 text-[11px]">
-            {cameras.map((c) => (
+            <span className="px-1.5 text-slate-500 flex items-center space-x-1">
+              <Layout className="w-3 h-3" />
+              <span className="hidden sm:inline">Table:</span>
+            </span>
+            {(['oval', 'round', 'ushape'] as TableShapeType[]).map((shape) => (
               <button
-                key={c.id}
-                onClick={() => onSelectManualLiveCam(c.id)}
-                className={`px-2 py-1 rounded font-medium transition ${
-                  c.isLive
+                key={shape}
+                onClick={() => onUpdateRoomLayout({ tableShape: shape })}
+                className={`px-2 py-1 rounded font-medium capitalize transition ${
+                  roomLayout.tableShape === shape
                     ? 'bg-emerald-600 text-slate-950 font-bold shadow'
                     : 'text-slate-400 hover:text-slate-200'
                 }`}
-                title={`Switch live transmission to ${c.name}`}
               >
-                {c.name.split(' ')[0]}
+                {shape === 'ushape' ? 'U-Shape' : shape}
               </button>
             ))}
           </div>
 
+          {/* Zones Toggle */}
           <button
             onClick={() => setShowZones(!showZones)}
             className={`px-2.5 py-1 rounded text-[11px] font-medium flex items-center space-x-1 border transition-colors ${
@@ -517,6 +680,7 @@ export const SmartRoomDirectorCanvas: React.FC<SmartRoomDirectorCanvasProps> = (
             <span>Zones</span>
           </button>
 
+          {/* Studio Setup Trigger */}
           <button
             onClick={onOpenStudioSettings}
             className="px-2.5 py-1 rounded text-[11px] font-medium flex items-center space-x-1 bg-slate-800 hover:bg-slate-700 text-slate-200 border border-slate-700 transition-colors"
@@ -528,13 +692,25 @@ export const SmartRoomDirectorCanvas: React.FC<SmartRoomDirectorCanvasProps> = (
         </div>
       </div>
 
-      {/* Canvas Viewport */}
-      <div className="relative w-full h-[460px]">
-        <canvas ref={canvasRef} className="w-full h-full block" />
+      {/* Canvas Viewport with Mouse Drag Handler */}
+      <div className="relative w-full h-[470px]">
+        <canvas
+          ref={canvasRef}
+          onMouseDown={handleMouseDown}
+          onMouseMove={handleMouseMove}
+          onMouseUp={handleMouseUp}
+          onMouseLeave={handleMouseUp}
+          className={`w-full h-full block ${isHoveringCamera ? 'cursor-grab active:cursor-grabbing' : 'cursor-crosshair'}`}
+        />
+        {/* Drag Hint overlay */}
+        <div className="absolute top-2 left-3 px-2 py-1 rounded bg-slate-950/70 border border-slate-800/80 text-[10px] text-slate-400 pointer-events-none flex items-center space-x-1">
+          <Move className="w-3 h-3 text-cyan-400" />
+          <span>Click &amp; drag cameras along walls to reposition</span>
+        </div>
       </div>
 
-      {/* Bottom Room Legend & Camera Status Strip */}
-      <div className="flex flex-wrap items-center justify-between px-4 py-2 bg-slate-950 border-t border-slate-800 text-[11px] text-slate-400 gap-2">
+      {/* Bottom Room Legend & High-Contrast Camera Angle Strip */}
+      <div className="flex flex-wrap items-center justify-between px-4 py-2.5 bg-slate-950 border-t border-slate-800 text-[11px] text-slate-400 gap-2">
         <div className="flex items-center space-x-4">
           <div className="flex items-center space-x-1.5">
             <span className="w-2.5 h-2.5 rounded-full bg-emerald-500" />
@@ -550,19 +726,30 @@ export const SmartRoomDirectorCanvas: React.FC<SmartRoomDirectorCanvasProps> = (
           </div>
         </div>
 
-        <div className="flex items-center space-x-4 font-mono text-[10px]">
+        {/* High-Contrast Camera Angle Badges */}
+        <div className="flex items-center space-x-2 font-mono text-[11px]">
           {cameras.map((c) => (
-            <div key={c.id} className="flex items-center space-x-1">
+            <button
+              key={c.id}
+              onClick={() => onSelectManualLiveCam(c.id)}
+              className={`flex items-center space-x-1.5 px-2.5 py-1 rounded-md border transition ${
+                c.isLive
+                  ? 'bg-emerald-950/90 border-emerald-500 text-emerald-300 font-bold shadow'
+                  : 'bg-slate-900 border-slate-800 text-slate-300 hover:border-slate-700'
+              }`}
+            >
               <span
-                className={`w-2 h-2 rounded-full ${c.isLive ? 'bg-emerald-400 animate-pulse' : 'bg-slate-600'}`}
+                className={`w-2 h-2 rounded-full ${c.isLive ? 'bg-emerald-400 animate-pulse' : 'bg-slate-500'}`}
               />
-              <span className={c.isLive ? 'text-emerald-300 font-bold' : 'text-slate-400'}>
-                {c.name}: {Math.round(c.currentPanDeg)}°
+              <span>{c.name}:</span>
+              <span className={c.isLive ? 'text-white' : 'text-slate-400'}>
+                {Math.round(c.currentPanDeg)}°
               </span>
-            </div>
+              {c.isLive && <span className="text-[9px] bg-emerald-500 text-slate-950 px-1 rounded">LIVE</span>}
+            </button>
           ))}
           <div className="text-slate-500 pl-2 border-l border-slate-800">
-            Sector: <span className="text-slate-300 font-medium font-sans">{activeZoneName}</span>
+            Sector: <span className="text-emerald-400 font-medium font-sans">{activeZoneName}</span>
           </div>
         </div>
       </div>

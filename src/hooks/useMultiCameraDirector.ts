@@ -8,18 +8,27 @@ import {
   stepCameraPan,
 } from '../services/camera_ptz_math';
 
+export interface ActiveSpeakerTarget {
+  slotId: number;
+  pos: { x: number; y: number };
+  angleDeg: number;
+  isActive: boolean;
+  splDb: number;
+}
+
 export function useMultiCameraDirector(
   initialCameras: VirtualCamera[] = DEFAULT_VIRTUAL_CAMERAS,
   initialConfig: CameraDirectorConfig = DEFAULT_DIRECTOR_CONFIG
 ) {
   const [cameras, setCameras] = useState<VirtualCamera[]>(initialCameras);
   const [directorConfig, setDirectorConfig] = useState<CameraDirectorConfig>(initialConfig);
-  const [liveCamId, setLiveCamId] = useState<string>('cam-rear');
+  const [liveCamId, setLiveCamId] = useState<string>('cam-front');
 
   // Hysteresis & Schmitt-trigger tracking refs
   const lastSwitchTimeRef = useRef<number>(Date.now());
   const candidateCamIdRef = useRef<string | null>(null);
   const candidateStartTimeRef = useRef<number>(0);
+  const lastRoomAudioTimeRef = useRef<number>(Date.now());
 
   const directorConfigRef = useRef(directorConfig);
   directorConfigRef.current = directorConfig;
@@ -31,131 +40,186 @@ export function useMultiCameraDirector(
   camerasRef.current = cameras;
 
   /**
-   * Evaluates incoming speaker targets, executes Schmitt-trigger hysteresis switching,
-   * and advances camera pan motors.
+   * Broadcast-grade Camera Assignment & Sticky Memory Engine.
+   *
+   * 1. Assigns ONLY the optimal camera to a speaker (other cameras do NOT swarm to the same speaker).
+   * 2. Sticky Memory: Cameras hold framing on a speaker even during silence/breaths.
+   * 3. Schmitt Trigger: Smoothly cuts the "ON AIR" tally between cameras without hunting.
    */
   const processDirectorFrame = useCallback(
     (
-      speakerPos: { x: number; y: number } | null,
-      speakerAngleDeg: number | null,
+      speakers: ActiveSpeakerTarget[],
       roomWidth: number,
       roomHeight: number,
       dtSec: number
     ): { activeCamera: VirtualCamera | null; switched: boolean } => {
       const now = Date.now();
       const config = directorConfigRef.current;
-      const currentCameras = camerasRef.current;
+      let currentCameras = [...camerasRef.current];
       const currentLiveId = liveCamIdRef.current;
 
+      const activeSpeakers = speakers.filter((s) => s.isActive);
+      if (activeSpeakers.length > 0) {
+        lastRoomAudioTimeRef.current = now;
+      }
+
+      // Step 1: Manage Camera-to-Speaker Subject Allocation
+      // For each active speaker, bind them to their dedicated camera
+      for (const speaker of activeSpeakers) {
+        // Check if a camera is already assigned to this speaker slot
+        let boundCam = currentCameras.find((c) => c.assignedTargetSlot === speaker.slotId);
+
+        if (!boundCam) {
+          // Camera not yet assigned: find best candidate among unassigned cameras (or non-live cameras)
+          const availableCams = currentCameras.filter(
+            (c) => c.assignedTargetSlot === null || (!c.isLive && c.id !== currentLiveId)
+          );
+          const pool = availableCams.length > 0 ? availableCams : currentCameras;
+
+          // Score cameras for this speaker
+          const scored = pool.map((cam) => ({
+            cam,
+            score: scoreCameraCandidate(cam, speaker.pos, speaker.angleDeg, roomWidth, roomHeight),
+          }));
+          scored.sort((a, b) => b.score - a.score);
+
+          if (scored.length > 0) {
+            boundCam = scored[0].cam;
+            // Bind camera to this speaker slot
+            currentCameras = currentCameras.map((c) =>
+              c.id === boundCam!.id
+                ? {
+                    ...c,
+                    assignedTargetSlot: speaker.slotId,
+                    isLockedOnSubject: true,
+                    lastTargetPos: speaker.pos,
+                  }
+                : c.assignedTargetSlot === speaker.slotId
+                ? { ...c, assignedTargetSlot: null, isLockedOnSubject: false }
+                : c
+            );
+          }
+        } else {
+          // Update last target position for persistent sticky framing
+          currentCameras = currentCameras.map((c) =>
+            c.id === boundCam!.id ? { ...c, lastTargetPos: speaker.pos } : c
+          );
+        }
+      }
+
+      // Step 2: Compute target pan bearings for each camera independently
+      currentCameras = currentCameras.map((cam) => {
+        const camX = cam.xRatio * roomWidth;
+        const camY = cam.yRatio * roomHeight;
+
+        // If camera is bound to a speaker
+        if (cam.assignedTargetSlot !== null) {
+          const boundSpeaker = speakers.find((s) => s.slotId === cam.assignedTargetSlot);
+          const targetPos = boundSpeaker?.pos || cam.lastTargetPos;
+
+          if (targetPos) {
+            // Camera tracks its assigned speaker
+            const aimAngle = calculateCameraBearing(camX, camY, targetPos.x, targetPos.y);
+            return {
+              ...cam,
+              targetPanDeg: aimAngle,
+              isLockedOnSubject: true,
+            };
+          }
+        }
+
+        // Camera is not bound to an active speaker
+        // Sticky Memory: If it previously had a target and room silence is < 45s, HOLD position!
+        const isProlongedSilence = now - lastRoomAudioTimeRef.current > 45000;
+        if (cam.lastTargetPos && !isProlongedSilence) {
+          const holdAngle = calculateCameraBearing(camX, camY, cam.lastTargetPos.x, cam.lastTargetPos.y);
+          return {
+            ...cam,
+            targetPanDeg: holdAngle,
+            isLockedOnSubject: true,
+          };
+        }
+
+        // Otherwise, hold resting pan angle
+        return {
+          ...cam,
+          targetPanDeg: cam.restingPanDeg,
+          isLockedOnSubject: false,
+        };
+      });
+
+      // Step 3: Schmitt-Trigger & Live Tally Switcher ("ON AIR" Selection)
       let newLiveId = currentLiveId;
       let hasSwitched = false;
 
-      if (speakerPos !== null && speakerAngleDeg !== null) {
-        // 1. Calculate parallax aim bearing and quality score for each camera
-        const scoredCameras = currentCameras.map((cam) => {
-          const camX = cam.xRatio * roomWidth;
-          const camY = cam.yRatio * roomHeight;
-          const targetPan = calculateCameraBearing(camX, camY, speakerPos.x, speakerPos.y);
-          const score = scoreCameraCandidate(cam, speakerPos, speakerAngleDeg, roomWidth, roomHeight);
+      // Find the speaker who is speaking with highest volume right now
+      const dominantSpeaker = activeSpeakers.sort((a, b) => b.splDb - a.splDb)[0];
 
-          return {
-            ...cam,
-            targetPanDeg: targetPan,
-            score,
-          };
-        });
+      if (dominantSpeaker) {
+        // Find which camera is framing this dominant speaker
+        const targetCam = currentCameras.find((c) => c.assignedTargetSlot === dominantSpeaker.slotId);
 
-        // 2. Identify top scoring camera candidate
-        scoredCameras.sort((a, b) => b.score - a.score);
-        const topCandidate = scoredCameras[0];
-        const currentLiveCam = scoredCameras.find((c) => c.id === currentLiveId) || topCandidate;
-
-        // 3. Evaluate Schmitt-Trigger & Hold-Time Hysteresis
-        if (topCandidate.id !== currentLiveId) {
+        if (targetCam && targetCam.id !== currentLiveId) {
           const timeSinceLastSwitch = now - lastSwitchTimeRef.current;
-          const scoreThreshold = currentLiveCam.score * (1.0 + config.hysteresisMarginPercent / 100.0);
+          const currentLiveCam = currentCameras.find((c) => c.id === currentLiveId);
 
-          // Condition 1: Current camera must have completed minimum hold time
-          // Condition 2: Candidate must exceed current camera score by hysteresis margin
-          if (timeSinceLastSwitch >= config.holdTimeMs && topCandidate.score >= scoreThreshold) {
-            // Condition 3: Candidate persistence debounce timer
-            if (candidateCamIdRef.current !== topCandidate.id) {
-              candidateCamIdRef.current = topCandidate.id;
+          const liveScore = currentLiveCam
+            ? scoreCameraCandidate(currentLiveCam, dominantSpeaker.pos, dominantSpeaker.angleDeg, roomWidth, roomHeight)
+            : 0;
+          const targetScore = scoreCameraCandidate(targetCam, dominantSpeaker.pos, dominantSpeaker.angleDeg, roomWidth, roomHeight);
+          const threshold = liveScore * (1.0 + config.hysteresisMarginPercent / 100.0);
+
+          // Schmitt Trigger: Hold time + Score margin + Confirmation debounce
+          if (timeSinceLastSwitch >= config.holdTimeMs && targetScore >= threshold) {
+            if (candidateCamIdRef.current !== targetCam.id) {
+              candidateCamIdRef.current = targetCam.id;
               candidateStartTimeRef.current = now;
             } else if (now - candidateStartTimeRef.current >= config.confirmTimeMs) {
-              // Confirmed sustained speech in candidate's view -> Trigger Cut!
-              newLiveId = topCandidate.id;
+              newLiveId = targetCam.id;
               hasSwitched = true;
               lastSwitchTimeRef.current = now;
               candidateCamIdRef.current = null;
               setLiveCamId(newLiveId);
             }
           } else {
-            // Conditions not met; reset candidate debounce
             candidateCamIdRef.current = null;
           }
         } else {
           candidateCamIdRef.current = null;
         }
-
-        // 4. Advance pan angles for all cameras
-        const updatedCameras = scoredCameras.map((cam) => {
-          const isLive = cam.id === newLiveId;
-          let newPan = cam.currentPanDeg;
-
-          if (config.instantCut && isLive && hasSwitched) {
-            // Broadcast cut: snap directly to target
-            newPan = cam.targetPanDeg;
-          } else {
-            // Smooth slew toward target
-            newPan = stepCameraPan(
-              cam.currentPanDeg,
-              cam.targetPanDeg,
-              dtSec,
-              config.slewSpeedDegPerSec,
-              4.5
-            );
-          }
-
-          return {
-            ...cam,
-            currentPanDeg: newPan,
-            isLive,
-          };
-        });
-
-        camerasRef.current = updatedCameras;
-        setCameras(updatedCameras);
-
-        return {
-          activeCamera: updatedCameras.find((c) => c.id === newLiveId) || null,
-          switched: hasSwitched,
-        };
-      } else {
-        // Idle state: cameras gently return toward resting pan angles
-        const idleCameras = currentCameras.map((cam) => {
-          const idlePan = stepCameraPan(
-            cam.currentPanDeg,
-            cam.restingPanDeg,
-            dtSec,
-            40.0,
-            2.5
-          );
-          return {
-            ...cam,
-            currentPanDeg: idlePan,
-            isLive: cam.id === currentLiveId,
-          };
-        });
-
-        camerasRef.current = idleCameras;
-        setCameras(idleCameras);
-
-        return {
-          activeCamera: idleCameras.find((c) => c.id === currentLiveId) || null,
-          switched: false,
-        };
       }
+
+      // Step 4: Advance camera pan motors (Snappy 120°/s or instant cuts)
+      const updatedCameras = currentCameras.map((cam) => {
+        const isLive = cam.id === newLiveId;
+        let newPan = cam.currentPanDeg;
+
+        if (config.instantCut && isLive && hasSwitched) {
+          newPan = cam.targetPanDeg;
+        } else {
+          newPan = stepCameraPan(
+            cam.currentPanDeg,
+            cam.targetPanDeg,
+            dtSec,
+            config.slewSpeedDegPerSec,
+            4.2
+          );
+        }
+
+        return {
+          ...cam,
+          currentPanDeg: newPan,
+          isLive,
+        };
+      });
+
+      camerasRef.current = updatedCameras;
+      setCameras(updatedCameras);
+
+      return {
+        activeCamera: updatedCameras.find((c) => c.id === newLiveId) || null,
+        switched: hasSwitched,
+      };
     },
     []
   );
@@ -184,7 +248,7 @@ export function useMultiCameraDirector(
   const resetToDefaults = useCallback(() => {
     setCameras(DEFAULT_VIRTUAL_CAMERAS);
     setDirectorConfig(DEFAULT_DIRECTOR_CONFIG);
-    setLiveCamId('cam-rear');
+    setLiveCamId('cam-front');
     lastSwitchTimeRef.current = Date.now();
   }, []);
 

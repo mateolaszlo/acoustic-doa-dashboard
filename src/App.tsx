@@ -21,7 +21,8 @@ import { useMeetingDiarization } from './hooks/useMeetingDiarization.js';
 import { useMultiCameraDirector } from './hooks/useMultiCameraDirector.js';
 import { useAuth } from './context/AuthContext.js';
 import { playSonarPing } from './services/audio_chime.js';
-import { DashboardMode } from './types/api_types.js';
+import { DashboardMode, RoomLayoutConfig } from './types/api_types.js';
+import { DEFAULT_ROOM_LAYOUT } from './services/camera_ptz_math.js';
 import { Sliders, PieChart, ListFilter, Users, Cpu, MapPin } from 'lucide-react';
 
 type TabType = 'calibration' | 'analytics' | 'logs' | 'users' | 'nodes';
@@ -91,6 +92,31 @@ export function App() {
     updateConfig: updateDirectorConfig,
     resetToDefaults: resetDirectorDefaults,
   } = useMultiCameraDirector();
+
+  // Interactive Conference Room & Table Layout Configuration
+  const [roomLayout, setRoomLayout] = useState<RoomLayoutConfig>(() => {
+    try {
+      const saved = localStorage.getItem('acoustic_room_layout_config');
+      if (saved) {
+        return { ...DEFAULT_ROOM_LAYOUT, ...JSON.parse(saved) };
+      }
+    } catch (e) {
+      console.warn('Failed to load room layout from localStorage', e);
+    }
+    return DEFAULT_ROOM_LAYOUT;
+  });
+
+  const handleUpdateRoomLayout = (partial: Partial<RoomLayoutConfig>) => {
+    setRoomLayout((prev) => {
+      const next = { ...prev, ...partial };
+      try {
+        localStorage.setItem('acoustic_room_layout_config', JSON.stringify(next));
+      } catch (e) {
+        console.warn('Failed to save room layout to localStorage', e);
+      }
+      return next;
+    });
+  };
 
   // If role changes or user logs out while in admin mode or viewing an admin-only tab, fall back
   useEffect(() => {
@@ -162,6 +188,9 @@ export function App() {
               zones={zones}
               cameras={cameras}
               liveCamId={liveCamId}
+              roomLayout={roomLayout}
+              onUpdateRoomLayout={handleUpdateRoomLayout}
+              onUpdateCamera={updateCamera}
               onProcessFrame={processDirectorFrame}
               onSelectManualLiveCam={setManualLiveCamera}
               onOpenStudioSettings={() => setIsStudioModalOpen(true)}

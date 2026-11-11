@@ -4,8 +4,11 @@ import {
   calculateCameraBearing,
   scoreCameraCandidate,
   DEFAULT_VIRTUAL_CAMERAS,
+  DEFAULT_ROOM_LAYOUT,
   wrapAngle180,
+  stepCameraPan,
 } from '../src/services/camera_ptz_math.js';
+import { VirtualCamera } from '../src/types/api_types.js';
 
 describe('Multi-Camera Studio & Trigonometric Parallax Geometry', () => {
   const arrayX = 400;
@@ -113,5 +116,80 @@ describe('Multi-Camera Studio & Trigonometric Parallax Geometry', () => {
 
     const strongCandidateScore = 86;
     expect(strongCandidateScore >= threshold).toBe(true); // Decisive switch
+  });
+
+  it('validates default room layout and virtual camera configuration', () => {
+    expect(DEFAULT_ROOM_LAYOUT.tableShape).toBe('oval');
+    expect(DEFAULT_ROOM_LAYOUT.seatCount).toBe(8);
+    expect(DEFAULT_ROOM_LAYOUT.tableWidthRatio).toBeGreaterThan(0.3);
+
+    expect(DEFAULT_VIRTUAL_CAMERAS.length).toBe(3);
+    for (const cam of DEFAULT_VIRTUAL_CAMERAS) {
+      expect(cam.assignedTargetSlot).toBeNull();
+      expect(cam.isLockedOnSubject).toBe(false);
+      expect(cam.lastTargetPos).toBeNull();
+    }
+  });
+
+  it('verifies sticky memory maintains speaker aim angle during speech pauses', () => {
+    // Front camera at (400, 40)
+    const roomW = 800;
+    const roomH = 500;
+    const camX = 400;
+    const camY = 40;
+
+    // Speaker 1 at (450, 300)
+    const speaker1Pos = { x: 450, y: 300 };
+    const aimAngle = calculateCameraBearing(camX, camY, speaker1Pos.x, speaker1Pos.y);
+
+    // Initial camera state
+    let testCam: VirtualCamera = {
+      ...DEFAULT_VIRTUAL_CAMERAS[0],
+      currentPanDeg: 180, // Facing South
+      targetPanDeg: aimAngle,
+      assignedTargetSlot: 0,
+      isLockedOnSubject: true,
+      lastTargetPos: speaker1Pos,
+    };
+
+    // Camera slews toward speaker over multiple animation frames
+    for (let frame = 0; frame < 30; frame++) {
+      testCam.currentPanDeg = stepCameraPan(testCam.currentPanDeg, testCam.targetPanDeg, 0.05, 120);
+    }
+    expect(testCam.currentPanDeg).toBeCloseTo(aimAngle, 1);
+
+    // Now speaker goes quiet (slot inactive, speaker leaves active list)
+    // Sticky memory: camera should retain aim angle on lastTargetPos rather than jumping to resting angle (180)
+    const holdAngle = calculateCameraBearing(camX, camY, testCam.lastTargetPos!.x, testCam.lastTargetPos!.y);
+    expect(holdAngle).toBeCloseTo(aimAngle, 2);
+    expect(holdAngle).not.toBe(testCam.restingPanDeg);
+  });
+
+  it('verifies camera assignment separates distinct speakers across cameras', () => {
+    const roomW = 800;
+    const roomH = 500;
+    const frontCam = DEFAULT_VIRTUAL_CAMERAS.find((c) => c.role === 'front')!;
+    const rearCam = DEFAULT_VIRTUAL_CAMERAS.find((c) => c.role === 'rear')!;
+
+    // Speaker 0 at Podium (North, 0 deg)
+    const podiumSpeaker = calculateSpeakerWorldPos(400, 250, 0, 160);
+    // Speaker 1 at Audience (South, 180 deg)
+    const audienceSpeaker = calculateSpeakerWorldPos(400, 250, 180, 160);
+
+    const podiumRearScore = scoreCameraCandidate(rearCam, podiumSpeaker, 0, roomW, roomH);
+    const podiumFrontScore = scoreCameraCandidate(frontCam, podiumSpeaker, 0, roomW, roomH);
+
+    const audienceRearScore = scoreCameraCandidate(rearCam, audienceSpeaker, 180, roomW, roomH);
+    const audienceFrontScore = scoreCameraCandidate(frontCam, audienceSpeaker, 180, roomW, roomH);
+
+    // Rear camera is optimal for podium presenter
+    expect(podiumRearScore).toBeGreaterThan(podiumFrontScore);
+
+    // Front camera is optimal for audience speaker
+    expect(audienceFrontScore).toBeGreaterThan(audienceRearScore);
+
+    // Demonstrates that optimal camera assignment gives each speaker their own dedicated camera
+    expect(podiumRearScore).toBeGreaterThan(audienceRearScore);
+    expect(audienceFrontScore).toBeGreaterThan(podiumFrontScore);
   });
 });

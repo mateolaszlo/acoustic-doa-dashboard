@@ -5,7 +5,7 @@
  * multi-camera candidate scoring, and critically-damped pan inertia.
  */
 
-import { SpatialZone, VirtualCamera, CameraDirectorConfig } from '../types/api_types';
+import { SpatialZone, VirtualCamera, CameraDirectorConfig, RoomLayoutConfig } from '../types/api_types';
 
 export const DEFAULT_VIRTUAL_CAMERAS: VirtualCamera[] = [
   {
@@ -20,6 +20,9 @@ export const DEFAULT_VIRTUAL_CAMERAS: VirtualCamera[] = [
     color: '#10b981',
     isLive: true,
     role: 'front',
+    assignedTargetSlot: null,
+    isLockedOnSubject: false,
+    lastTargetPos: null,
   },
   {
     id: 'cam-rear',
@@ -33,6 +36,9 @@ export const DEFAULT_VIRTUAL_CAMERAS: VirtualCamera[] = [
     color: '#38bdf8',
     isLive: false,
     role: 'rear',
+    assignedTargetSlot: null,
+    isLockedOnSubject: false,
+    lastTargetPos: null,
   },
   {
     id: 'cam-side',
@@ -46,6 +52,9 @@ export const DEFAULT_VIRTUAL_CAMERAS: VirtualCamera[] = [
     color: '#818cf8',
     isLive: false,
     role: 'side',
+    assignedTargetSlot: null,
+    isLockedOnSubject: false,
+    lastTargetPos: null,
   },
 ];
 
@@ -55,6 +64,13 @@ export const DEFAULT_DIRECTOR_CONFIG: CameraDirectorConfig = {
   holdTimeMs: 1800,
   confirmTimeMs: 350,
   hysteresisMarginPercent: 20,
+};
+
+export const DEFAULT_ROOM_LAYOUT: RoomLayoutConfig = {
+  tableShape: 'oval',
+  tableWidthRatio: 0.52,
+  tableHeightRatio: 0.32,
+  seatCount: 8,
 };
 
 /**

@@ -170,6 +170,17 @@ export interface MultipathMetrics {
   reflections: MultipathReflection[];
 }
 
+export type TableShapeType = 'oval' | 'round' | 'ushape' | 'hollow_square';
+
+export interface RoomLayoutConfig {
+  tableShape: TableShapeType;
+  tableWidthRatio: number; // 0.3 .. 0.8
+  tableHeightRatio: number; // 0.2 .. 0.6
+  seatCount: number; // 4 .. 12
+  speaker1SeatAngleDeg?: number;
+  speaker2SeatAngleDeg?: number;
+}
+
 export interface VirtualCamera {
   id: string; // 'cam-front', 'cam-rear', 'cam-side'
   name: string; // 'Front Stage Cam', 'Rear Audience Cam', 'Side Profile Cam'
@@ -182,6 +193,9 @@ export interface VirtualCamera {
   color: string;
   isLive: boolean; // "ON AIR"
   role: 'front' | 'rear' | 'side';
+  assignedTargetSlot: number | null; // 0 = Speaker 1, 1 = Speaker 2, null = Wide room
+  isLockedOnSubject: boolean;
+  lastTargetPos?: { x: number; y: number } | null;
 }
 
 export interface CameraDirectorConfig {
@@ -191,6 +205,7 @@ export interface CameraDirectorConfig {
   confirmTimeMs: number; // e.g. 350ms
   hysteresisMarginPercent: number; // e.g. 20%
 }
+
 
 
 
