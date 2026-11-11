@@ -320,9 +320,6 @@ export const DiarizationTimeline: React.FC<DiarizationTimelineProps> = ({
         <div className="flex items-center space-x-2">
           <Activity className="w-4 h-4 text-emerald-400" />
           <h4 className="font-semibold text-slate-200 text-sm">Meeting Diarization Timeline</h4>
-          <span className="text-[10px] font-mono text-emerald-400 bg-emerald-950/80 px-2 py-0.5 rounded border border-emerald-800/60">
-            60fps Continuous Stream
-          </span>
           <span className="text-[10px] font-mono text-slate-400 bg-slate-800 px-2 py-0.5 rounded flex items-center space-x-1">
             <Clock className="w-3 h-3 text-slate-400" />
             <span>Session: {Math.round(analytics.totalDurationMs / 1000)}s</span>

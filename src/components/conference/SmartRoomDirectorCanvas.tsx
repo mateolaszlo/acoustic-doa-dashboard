@@ -268,22 +268,35 @@ export const SmartRoomDirectorCanvas: React.FC<SmartRoomDirectorCanvasProps> = (
         ctx.stroke();
 
         // Seating chairs around oval
-        const perSideSeats = Math.max(2, Math.floor((totalSeats - 2) / 2));
-        for (let i = 0; i < perSideSeats; i++) {
-          const t = perSideSeats > 1 ? i / (perSideSeats - 1) : 0.5;
-          const cx = tableX + 32 + t * (tableWidth - 64);
+        if (totalSeats <= 4) {
+          // Exactly 4 chairs: 1 North, 1 East, 1 South, 1 West
           ctx.beginPath();
-          ctx.arc(cx, tableY - 11, chairRadius, 0, Math.PI * 2);
-          ctx.arc(cx, tableY + tableHeight + 11, chairRadius, 0, Math.PI * 2);
+          ctx.arc(centerX, tableY - 11, chairRadius, 0, Math.PI * 2); // North
+          ctx.arc(centerX, tableY + tableHeight + 11, chairRadius, 0, Math.PI * 2); // South
+          ctx.arc(tableX - 11, centerY, chairRadius, 0, Math.PI * 2); // West
+          ctx.arc(tableX + tableWidth + 11, centerY, chairRadius, 0, Math.PI * 2); // East
           ctx.fillStyle = chairColor;
           ctx.fill();
+        } else {
+          // 2 head chairs (West and East)
+          ctx.beginPath();
+          ctx.arc(tableX - 11, centerY, chairRadius, 0, Math.PI * 2);
+          ctx.arc(tableX + tableWidth + 11, centerY, chairRadius, 0, Math.PI * 2);
+          ctx.fillStyle = chairColor;
+          ctx.fill();
+
+          // Remaining chairs distributed evenly along top and bottom
+          const perSide = Math.floor((totalSeats - 2) / 2);
+          for (let i = 0; i < perSide; i++) {
+            const t = perSide > 1 ? i / (perSide - 1) : 0.5;
+            const cx = tableX + 36 + t * (tableWidth - 72);
+            ctx.beginPath();
+            ctx.arc(cx, tableY - 11, chairRadius, 0, Math.PI * 2);
+            ctx.arc(cx, tableY + tableHeight + 11, chairRadius, 0, Math.PI * 2);
+            ctx.fillStyle = chairColor;
+            ctx.fill();
+          }
         }
-        // Head chairs
-        ctx.beginPath();
-        ctx.arc(tableX - 11, centerY, chairRadius, 0, Math.PI * 2);
-        ctx.arc(tableX + tableWidth + 11, centerY, chairRadius, 0, Math.PI * 2);
-        ctx.fillStyle = chairColor;
-        ctx.fill();
       } else if (layout.tableShape === 'round') {
         // Roundtable Circle Table
         const r = Math.min(tableWidth, tableHeight) * 0.44;
@@ -448,8 +461,13 @@ export const SmartRoomDirectorCanvas: React.FC<SmartRoomDirectorCanvasProps> = (
       if (showZonesRef.current && zonesRef.current.length > 0) {
         const zoneRadius = Math.min(width, height) * 0.44;
         for (const zone of zonesRef.current) {
-          const startRad = ((zone.min_angle_deg - 90) * Math.PI) / 180;
-          const endRad = ((zone.max_angle_deg - 90) * Math.PI) / 180;
+          const startDeg = zone.min_angle_deg;
+          let endDeg = zone.max_angle_deg;
+          if (endDeg <= startDeg) {
+            endDeg += 360;
+          }
+          const startRad = ((startDeg - 90) * Math.PI) / 180;
+          const endRad = ((endDeg - 90) * Math.PI) / 180;
 
           // Semi-transparent sector wedge (Overlays table and floor)
           ctx.beginPath();
@@ -485,7 +503,8 @@ export const SmartRoomDirectorCanvas: React.FC<SmartRoomDirectorCanvasProps> = (
           ctx.stroke();
 
           // Zone text label (Offset radially to avoid camera collisions)
-          const midAngleDeg = (zone.min_angle_deg + zone.max_angle_deg) / 2;
+          let midAngleDeg = (startDeg + endDeg) / 2;
+          if (midAngleDeg > 180) midAngleDeg -= 360;
           const midRad = ((midAngleDeg - 90) * Math.PI) / 180;
           const labelDist = zoneRadius * 0.72;
           const lx = centerX + Math.cos(midRad) * labelDist;
@@ -623,11 +642,12 @@ export const SmartRoomDirectorCanvas: React.FC<SmartRoomDirectorCanvasProps> = (
 
       if (activeCamera && speakerTargets.some((s) => s.isActive)) {
         const aimDeg = Math.round(activeCamera.currentPanDeg);
+        const role = activeCamera.role === 'front' ? 'FRONT' : activeCamera.role === 'rear' ? 'REAR' : 'SIDE';
         setCameraStatus(
-          `[LIVE: ${activeCamera.name.toUpperCase()}] AIM: ${aimDeg > 0 ? '+' : ''}${aimDeg}° -> ${resolvedZone.toUpperCase()}`
+          `[LIVE: ${role}] ${aimDeg > 0 ? '+' : ''}${aimDeg}° • ${resolvedZone.toUpperCase()}`
         );
       } else {
-        setCameraStatus('IDLE • MULTI-CAMERA STANDBY');
+        setCameraStatus('STANDBY • 3-NODE READY');
       }
 
       // 8. Render All Virtual Cameras (Frustums, Cones, Tally Lights)
@@ -828,26 +848,31 @@ export const SmartRoomDirectorCanvas: React.FC<SmartRoomDirectorCanvasProps> = (
   return (
     <div className="flex flex-col bg-slate-900 border border-slate-800 rounded-xl overflow-hidden shadow-2xl">
       {/* Canvas Top Bar Controls & Telemetry */}
-      <div className="flex flex-wrap items-center justify-between px-4 py-2.5 bg-slate-950 border-b border-slate-800 gap-2">
+      <div className="flex items-center justify-between px-4 py-2 bg-slate-950 border-b border-slate-800 gap-3 overflow-x-auto whitespace-nowrap">
         {/* Title & Studio Status */}
-        <div className="flex items-center space-x-2">
-          <Camera className="w-4 h-4 text-emerald-400 animate-pulse" />
-          <span className="font-semibold text-slate-200 uppercase tracking-wider text-xs">
-            Smart Multi-Camera Director
-          </span>
-          <span className="px-2 py-0.5 rounded-full text-[10px] font-mono font-medium bg-emerald-950/80 text-emerald-300 border border-emerald-800/60">
-            3-NODE STUDIO
-          </span>
-        </div>
+        <div className="flex items-center space-x-3 shrink-0">
+          <div className="flex items-center space-x-1.5">
+            <Camera className="w-4 h-4 text-emerald-400 animate-pulse" />
+            <span className="font-semibold text-slate-200 uppercase tracking-wider text-xs">
+              Director Studio
+            </span>
+            <span className="px-1.5 py-0.5 rounded-full text-[9px] font-mono font-medium bg-emerald-950/80 text-emerald-300 border border-emerald-800/60">
+              3 NODES
+            </span>
+          </div>
 
-        {/* Real-time Camera Telemetry Pill */}
-        <div className="flex items-center space-x-2 font-mono text-slate-400 text-xs">
-          <Radio className="w-3.5 h-3.5 text-cyan-400" />
-          <span className="text-slate-300 font-medium">{cameraStatus}</span>
+          {/* Real-time Camera Telemetry Pill */}
+          <div
+            className="flex items-center space-x-1.5 font-mono text-slate-400 text-xs max-w-[260px] truncate bg-slate-900/90 px-2 py-0.5 rounded border border-slate-800"
+            title={cameraStatus}
+          >
+            <Radio className="w-3 h-3 text-cyan-400 shrink-0" />
+            <span className="text-slate-200 font-medium truncate">{cameraStatus}</span>
+          </div>
         </div>
 
         {/* Interactive View Controls */}
-        <div className="flex items-center space-x-2">
+        <div className="flex items-center space-x-2 shrink-0">
           {/* Table Shape Switcher Toolbar */}
           <div className="flex items-center bg-slate-900 border border-slate-800 rounded-lg p-0.5 text-[11px]">
             <span className="px-1.5 text-slate-500 flex items-center space-x-1">

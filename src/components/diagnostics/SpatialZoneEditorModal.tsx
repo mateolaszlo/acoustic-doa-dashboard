@@ -26,7 +26,7 @@ const PRESET_ROUNDTABLE: SpatialZone[] = [
   { name: 'North Chair', min_angle_deg: -45.0, max_angle_deg: 45.0, color: '#10b981', alert_threshold_db: 75.0 },
   { name: 'East Chair', min_angle_deg: 45.0, max_angle_deg: 135.0, color: '#38bdf8', alert_threshold_db: 75.0 },
   { name: 'West Chair', min_angle_deg: -135.0, max_angle_deg: -45.0, color: '#818cf8', alert_threshold_db: 75.0 },
-  { name: 'South Chair', min_angle_deg: 135.0, max_angle_deg: 180.0, color: '#f59e0b', alert_threshold_db: 75.0 },
+  { name: 'South Chair', min_angle_deg: 135.0, max_angle_deg: -135.0, color: '#f59e0b', alert_threshold_db: 75.0 },
 ];
 
 export const SpatialZoneEditorModal: React.FC<SpatialZoneEditorModalProps> = ({
@@ -75,8 +75,15 @@ export const SpatialZoneEditorModal: React.FC<SpatialZoneEditorModalProps> = ({
         setSaving(false);
         return;
       }
-      if (z.min_angle_deg >= z.max_angle_deg) {
-        setErrorMessage(`Zone '${z.name}': Min angle must be strictly less than Max angle`);
+      if (z.min_angle_deg === z.max_angle_deg) {
+        setErrorMessage(`Zone '${z.name}': Min angle cannot equal Max angle (${z.min_angle_deg}°)`);
+        setSaving(false);
+        return;
+      }
+      if (z.min_angle_deg > z.max_angle_deg && !(z.min_angle_deg > 0 && z.max_angle_deg < 0)) {
+        setErrorMessage(
+          `Zone '${z.name}': Min angle (${z.min_angle_deg}°) cannot exceed Max angle (${z.max_angle_deg}°) unless wrapping across South (min > 0, max < 0)`
+        );
         setSaving(false);
         return;
       }
@@ -139,6 +146,12 @@ export const SpatialZoneEditorModal: React.FC<SpatialZoneEditorModalProps> = ({
             >
               Roundtable 360
             </button>
+          </div>
+
+          <div className="p-2.5 bg-slate-950/80 rounded-lg border border-slate-800/80 text-[11px] text-slate-400 flex items-center justify-between">
+            <span>
+              💡 <span className="text-slate-300 font-medium">Circular Wrap-Around:</span> For sectors crossing South (±180°), set a positive start and negative end angle (e.g., <code className="text-cyan-400 font-mono">135°</code> to <code className="text-cyan-400 font-mono">-135°</code>).
+            </span>
           </div>
 
           {/* Zones Form List */}

@@ -308,14 +308,23 @@ export function stepCameraPan(
 
 /**
  * Resolves which spatial room zone an acoustic arrival belongs to.
+ * Supports standard sectors (min <= max) and circular wrap-around sectors
+ * crossing the +-180° South boundary (min > max, e.g. 135° to -135°).
  */
 export function resolveSpatialZone(angleDeg: number, zones: SpatialZone[]): SpatialZone | null {
   if (!zones || zones.length === 0) return null;
   const norm = wrapAngle180(angleDeg);
 
   for (const zone of zones) {
-    if (norm >= zone.min_angle_deg && norm <= zone.max_angle_deg) {
-      return zone;
+    if (zone.min_angle_deg <= zone.max_angle_deg) {
+      if (norm >= zone.min_angle_deg && norm <= zone.max_angle_deg) {
+        return zone;
+      }
+    } else {
+      // Circular wrap-around sector crossing +-180° South seam (e.g. 135° to -135°)
+      if (norm >= zone.min_angle_deg || norm <= zone.max_angle_deg) {
+        return zone;
+      }
     }
   }
   return null;

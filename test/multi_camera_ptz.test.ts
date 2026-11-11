@@ -8,8 +8,9 @@ import {
   DEFAULT_ROOM_LAYOUT,
   wrapAngle180,
   stepCameraPan,
+  resolveSpatialZone,
 } from '../src/services/camera_ptz_math.js';
-import { VirtualCamera, RoomLayoutConfig } from '../src/types/api_types.js';
+import { VirtualCamera, RoomLayoutConfig, SpatialZone } from '../src/types/api_types.js';
 
 describe('Multi-Camera Studio & Trigonometric Parallax Geometry', () => {
   const arrayX = 400;
@@ -251,5 +252,36 @@ describe('Multi-Camera Studio & Trigonometric Parallax Geometry', () => {
     // Speaker at 0° (North) must be in the Stage/Podium area (y < centerY)
     const northUShape = calculateTablePerimeterPos(centerX, centerY, 0, ushapeLayout, roomW, roomH);
     expect(northUShape.y).toBeLessThan(centerY - 50);
+  });
+
+  it('correctly resolves circular wrap-around spatial zones across the +-180° South boundary', () => {
+    const zones: SpatialZone[] = [
+      { name: 'North Chair', min_angle_deg: -45, max_angle_deg: 45, color: '#10b981' },
+      { name: 'East Chair', min_angle_deg: 45, max_angle_deg: 135, color: '#38bdf8' },
+      { name: 'South Chair', min_angle_deg: 135, max_angle_deg: -135, color: '#f59e0b' },
+      { name: 'West Chair', min_angle_deg: -135, max_angle_deg: -45, color: '#818cf8' },
+    ];
+
+    // North (0°) -> North Chair
+    expect(resolveSpatialZone(0, zones)?.name).toBe('North Chair');
+    expect(resolveSpatialZone(30, zones)?.name).toBe('North Chair');
+    expect(resolveSpatialZone(-30, zones)?.name).toBe('North Chair');
+
+    // East (90°) -> East Chair
+    expect(resolveSpatialZone(90, zones)?.name).toBe('East Chair');
+    expect(resolveSpatialZone(60, zones)?.name).toBe('East Chair');
+    expect(resolveSpatialZone(130, zones)?.name).toBe('East Chair');
+
+    // South (+-180° / 135° to -135°) -> South Chair
+    expect(resolveSpatialZone(140, zones)?.name).toBe('South Chair');
+    expect(resolveSpatialZone(180, zones)?.name).toBe('South Chair');
+    expect(resolveSpatialZone(-180, zones)?.name).toBe('South Chair');
+    expect(resolveSpatialZone(-170, zones)?.name).toBe('South Chair');
+    expect(resolveSpatialZone(-140, zones)?.name).toBe('South Chair');
+
+    // West (-90°) -> West Chair
+    expect(resolveSpatialZone(-90, zones)?.name).toBe('West Chair');
+    expect(resolveSpatialZone(-60, zones)?.name).toBe('West Chair');
+    expect(resolveSpatialZone(-130, zones)?.name).toBe('West Chair');
   });
 });
