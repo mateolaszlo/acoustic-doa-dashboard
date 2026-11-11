@@ -384,11 +384,59 @@ export function useMultiCameraDirector({
     (partial: Partial<RoomLayoutConfig>) => {
       setRoomLayout((prev) => {
         const next = { ...prev, ...partial };
+        if (partial.customChairs === null) {
+          delete next.customChairs;
+        }
         try {
           localStorage.setItem('acoustic_room_layout_config', JSON.stringify(next));
         } catch {}
-        scheduleBackendSync({ roomLayout: next }, false);
+        scheduleBackendSync(
+          {
+            roomLayout: {
+              ...next,
+              customChairs: partial.customChairs === null ? null : next.customChairs,
+            },
+          },
+          false
+        );
         return next;
+      });
+    },
+    [scheduleBackendSync]
+  );
+
+  const setCameraCount = useCallback(
+    (count: number) => {
+      const targetCount = Math.max(1, Math.min(3, Math.round(count)));
+      setCameras((prevCams) => {
+        const nextCams: VirtualCamera[] = [];
+        for (let i = 0; i < targetCount; i++) {
+          const defaultCam = DEFAULT_VIRTUAL_CAMERAS[i];
+          const existing = prevCams.find((c) => c.id === defaultCam.id);
+          if (existing) {
+            nextCams.push({ ...existing });
+          } else {
+            nextCams.push({ ...defaultCam });
+          }
+        }
+
+        let nextLiveId = liveCamIdRef.current;
+        if (!nextCams.some((c) => c.id === nextLiveId)) {
+          nextLiveId = nextCams[0]?.id || 'cam-front';
+          setLiveCamId(nextLiveId);
+        }
+
+        const updatedWithLive = nextCams.map((c) => ({
+          ...c,
+          isLive: c.id === nextLiveId,
+        }));
+
+        try {
+          localStorage.setItem('acoustic_cameras_config', JSON.stringify(updatedWithLive));
+        } catch {}
+
+        scheduleBackendSync({ cameras: updatedWithLive, liveCamId: nextLiveId }, true);
+        return updatedWithLive;
       });
     },
     [scheduleBackendSync]
@@ -462,6 +510,7 @@ export function useMultiCameraDirector({
     isLoadingStudio,
     processDirectorFrame,
     setManualLiveCamera,
+    setCameraCount,
     updateCamera,
     updateConfig,
     updateRoomLayout,

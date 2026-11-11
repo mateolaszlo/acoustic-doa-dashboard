@@ -397,4 +397,44 @@ describe('Multi-Camera Studio & Trigonometric Parallax Geometry', () => {
     }
     expect(switchWhileBothActive).toBe(false); // Prevents rapid flipping
   });
+
+  it('allocates and directs correctly for 1-camera (Single Stage) rig', () => {
+    // 1-Camera Rig: Only Stage Front Cam (cam-front)
+    const singleRig: VirtualCamera[] = [DEFAULT_VIRTUAL_CAMERAS[0]]; // cam-front at (0.5, 0.08)
+    const roomW = 850;
+    const roomH = 470;
+    const speakerAtTableSouth = { x: 425, y: 350 }; // South side of table
+
+    // Bearing from front camera (425, 37.6) to speaker (425, 350)
+    const bearing = calculateCameraBearing(
+      singleRig[0].xRatio * roomW,
+      singleRig[0].yRatio * roomH,
+      speakerAtTableSouth.x,
+      speakerAtTableSouth.y
+    );
+
+    // Front camera looks South (180°)
+    expect(bearing).toBeCloseTo(180, 1);
+    expect(singleRig.length).toBe(1);
+    expect(singleRig[0].id).toBe('cam-front');
+  });
+
+  it('supports 2-camera rig with cross-cut coverage between Front and Rear cameras', () => {
+    // 2-Camera Rig: Stage Front + Audience Rear
+    const dualRig: VirtualCamera[] = DEFAULT_VIRTUAL_CAMERAS.slice(0, 2);
+    expect(dualRig).toHaveLength(2);
+    expect(dualRig[0].id).toBe('cam-front');
+    expect(dualRig[1].id).toBe('cam-rear');
+
+    const roomW = 850;
+    const roomH = 470;
+
+    // Speaker facing North (e.g. Presenter at Podium, y = 140)
+    const presenterPos = { x: 425, y: 140 };
+    const scoreFront = scoreCameraCandidate(dualRig[0], presenterPos, 0, roomW, roomH);
+    const scoreRear = scoreCameraCandidate(dualRig[1], presenterPos, 0, roomW, roomH);
+
+    // Rear camera (facing North) has frontal view of presenter
+    expect(scoreRear).toBeGreaterThan(scoreFront);
+  });
 });

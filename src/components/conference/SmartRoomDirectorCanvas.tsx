@@ -53,6 +53,7 @@ interface SmartRoomDirectorCanvasProps {
   ) => { activeCamera: VirtualCamera | null; switched: boolean };
   onSelectManualLiveCam: (camId: string) => void;
   onOpenStudioSettings: () => void;
+  onSetCameraCount?: (count: number) => void;
 }
 
 function drawChair(
@@ -93,6 +94,7 @@ export const SmartRoomDirectorCanvas: React.FC<SmartRoomDirectorCanvasProps> = (
   onProcessFrame,
   onSelectManualLiveCam,
   onOpenStudioSettings,
+  onSetCameraCount,
 }) => {
   const canvasRef = useRef<HTMLCanvasElement | null>(null);
   const lastTimeRef = useRef<number>(performance.now());
@@ -815,7 +817,8 @@ export const SmartRoomDirectorCanvas: React.FC<SmartRoomDirectorCanvasProps> = (
           `[${lockTag}: ${role}] ${aimDeg > 0 ? '+' : ''}${aimDeg}° • ${resolvedZone.toUpperCase()}`
         );
       } else {
-        setCameraStatus('STANDBY • 3-NODE READY');
+        const camCount = camerasRef.current.length;
+        setCameraStatus(`STANDBY • ${camCount === 1 ? '1-CAMERA READY' : `${camCount}-CAMERAS READY`}`);
       }
 
       // 8. Render All Virtual Cameras (Frustums, Cones, Tally Lights)
@@ -1098,9 +1101,30 @@ export const SmartRoomDirectorCanvas: React.FC<SmartRoomDirectorCanvasProps> = (
               Director Studio
             </span>
             <span className="px-1.5 py-0.5 rounded-full text-[9px] font-mono font-medium bg-emerald-950/80 text-emerald-300 border border-emerald-800/60">
-              {cameras.length} CAMERAS
+              {cameras.length === 1 ? '1 CAMERA' : `${cameras.length} CAMERAS`}
             </span>
           </div>
+
+          {/* Quick Camera Count Switcher */}
+          {onSetCameraCount && (
+            <div className="flex items-center bg-slate-900 border border-slate-800 rounded-lg p-0.5 text-[10px]">
+              {[1, 2, 3].map((num) => (
+                <button
+                  key={num}
+                  type="button"
+                  onClick={() => onSetCameraCount(num)}
+                  className={`px-1.5 py-0.5 rounded font-mono font-bold transition ${
+                    cameras.length === num
+                      ? 'bg-emerald-600 text-slate-950 shadow'
+                      : 'text-slate-400 hover:text-slate-200 hover:bg-slate-800'
+                  }`}
+                  title={`Configure ${num} camera${num > 1 ? 's' : ''} (${num === 1 ? '1-CAMERA' : `${num}-CAMERAS`})`}
+                >
+                  {num}C
+                </button>
+              ))}
+            </div>
+          )}
 
           {/* Real-time Camera Telemetry Pill */}
           <div
@@ -1123,7 +1147,7 @@ export const SmartRoomDirectorCanvas: React.FC<SmartRoomDirectorCanvasProps> = (
             {shapeOptions.map((opt) => (
               <button
                 key={opt.id}
-                onClick={() => onUpdateRoomLayout({ tableShape: opt.id, customChairs: undefined })}
+                onClick={() => onUpdateRoomLayout({ tableShape: opt.id, customChairs: null })}
                 className={`px-2 py-1 rounded font-medium capitalize transition ${
                   roomLayout.tableShape === opt.id
                     ? 'bg-emerald-600 text-slate-950 font-bold shadow'
@@ -1245,7 +1269,7 @@ export const SmartRoomDirectorCanvas: React.FC<SmartRoomDirectorCanvasProps> = (
               onChange={(e) =>
                 onUpdateRoomLayout({
                   seatCount: Number(e.target.value),
-                  customChairs: undefined,
+                  customChairs: null,
                 })
               }
               className="w-full accent-indigo-500 cursor-pointer"
@@ -1255,7 +1279,7 @@ export const SmartRoomDirectorCanvas: React.FC<SmartRoomDirectorCanvasProps> = (
           {/* Presets, Reset & Auto-Arrange Chairs */}
           <div className="flex flex-wrap items-center gap-1.5 pt-2 sm:pt-0 sm:justify-end">
             <button
-              onClick={() => onUpdateRoomLayout({ customChairs: undefined })}
+              onClick={() => onUpdateRoomLayout({ customChairs: null })}
               className="px-2 py-1 rounded bg-slate-900 hover:bg-slate-800 text-indigo-300 text-[10px] border border-indigo-900/60 hover:border-indigo-700 transition"
               title="Reset chair placements back to default symmetry"
             >
@@ -1268,7 +1292,7 @@ export const SmartRoomDirectorCanvas: React.FC<SmartRoomDirectorCanvasProps> = (
                   tableWidthRatio: isRound ? 0.44 : 0.42,
                   tableHeightRatio: isRound ? 0.44 : 0.26,
                   seatCount: isRound ? 6 : 6,
-                  customChairs: undefined,
+                  customChairs: null,
                 });
               }}
               className="px-2 py-1 rounded bg-slate-900 hover:bg-slate-800 text-slate-300 text-[10px] border border-slate-800 transition"
@@ -1282,7 +1306,7 @@ export const SmartRoomDirectorCanvas: React.FC<SmartRoomDirectorCanvasProps> = (
                   tableWidthRatio: isRound ? 0.54 : 0.52,
                   tableHeightRatio: isRound ? 0.54 : 0.32,
                   seatCount: 8,
-                  customChairs: undefined,
+                  customChairs: null,
                 });
               }}
               className="px-2 py-1 rounded bg-slate-900 hover:bg-slate-800 text-slate-300 text-[10px] border border-slate-800 transition"
@@ -1296,7 +1320,7 @@ export const SmartRoomDirectorCanvas: React.FC<SmartRoomDirectorCanvasProps> = (
                   tableWidthRatio: isRound ? 0.64 : 0.66,
                   tableHeightRatio: isRound ? 0.64 : 0.36,
                   seatCount: 12,
-                  customChairs: undefined,
+                  customChairs: null,
                 });
               }}
               className="px-2 py-1 rounded bg-slate-900 hover:bg-slate-800 text-slate-300 text-[10px] border border-slate-800 transition"
@@ -1304,7 +1328,7 @@ export const SmartRoomDirectorCanvas: React.FC<SmartRoomDirectorCanvasProps> = (
               Executive
             </button>
             <button
-              onClick={() => onUpdateRoomLayout({ ...DEFAULT_ROOM_LAYOUT, customChairs: undefined })}
+              onClick={() => onUpdateRoomLayout({ ...DEFAULT_ROOM_LAYOUT, customChairs: null })}
               className="p-1 rounded bg-slate-900 hover:bg-slate-800 text-slate-400 hover:text-slate-200 border border-slate-800 transition"
               title="Reset to default table dimensions"
             >

@@ -91,6 +91,7 @@ export function App() {
     roomLayout,
     processDirectorFrame,
     setManualLiveCamera,
+    setCameraCount,
     updateCamera,
     updateConfig: updateDirectorConfig,
     updateRoomLayout: handleUpdateRoomLayout,
@@ -176,6 +177,7 @@ export function App() {
               roomLayout={roomLayout}
               onUpdateRoomLayout={handleUpdateRoomLayout}
               onUpdateCamera={updateCamera}
+              onSetCameraCount={setCameraCount}
               onProcessFrame={processDirectorFrame}
               onSelectManualLiveCam={setManualLiveCamera}
               onOpenStudioSettings={() => setIsStudioModalOpen(true)}
@@ -436,6 +438,7 @@ export function App() {
         cameras={cameras}
         config={directorConfig}
         onUpdateCamera={updateCamera}
+        onSetCameraCount={setCameraCount}
         onUpdateConfig={updateDirectorConfig}
         onResetDefaults={resetDirectorDefaults}
       />

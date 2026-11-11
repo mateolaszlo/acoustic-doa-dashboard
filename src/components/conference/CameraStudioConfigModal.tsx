@@ -10,6 +10,7 @@ interface CameraStudioConfigModalProps {
   onUpdateCamera: (id: string, partial: Partial<VirtualCamera>) => void;
   onUpdateConfig: (partial: Partial<CameraDirectorConfig>) => void;
   onResetDefaults: () => void;
+  onSetCameraCount?: (count: number) => void;
 }
 
 export const CameraStudioConfigModal: React.FC<CameraStudioConfigModalProps> = ({
@@ -20,6 +21,7 @@ export const CameraStudioConfigModal: React.FC<CameraStudioConfigModalProps> = (
   onUpdateCamera,
   onUpdateConfig,
   onResetDefaults,
+  onSetCameraCount,
 }) => {
   if (!isOpen) return null;
 
@@ -156,9 +158,55 @@ export const CameraStudioConfigModal: React.FC<CameraStudioConfigModalProps> = (
 
           {/* Section 2: Virtual Cameras Deployment */}
           <div className="space-y-3">
-            <span className="font-semibold text-slate-200 block text-xs">
-              Configured Studio Cameras (3 Nodes)
-            </span>
+            {/* Camera Count Rig Selector */}
+            <div className="p-3.5 bg-slate-950 rounded-lg border border-slate-800 flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+              <div>
+                <span className="font-semibold text-slate-200 block text-xs">
+                  Active Camera Rig Configuration
+                </span>
+                <span className="text-[11px] text-slate-400">
+                  Select available cameras for live tracking and switching.
+                </span>
+              </div>
+              <div className="flex items-center bg-slate-900 border border-slate-800 rounded-lg p-1 space-x-1 shrink-0">
+                {[
+                  { count: 1, label: '1 Camera', tag: '1-CAMERA' },
+                  { count: 2, label: '2 Cameras', tag: '2-CAMERAS' },
+                  { count: 3, label: '3 Cameras', tag: '3-CAMERAS' },
+                ].map((opt) => (
+                  <button
+                    key={opt.count}
+                    type="button"
+                    onClick={() => onSetCameraCount?.(opt.count)}
+                    className={`px-2.5 py-1.5 rounded text-xs transition flex items-center space-x-1.5 ${
+                      cameras.length === opt.count
+                        ? 'bg-emerald-600 text-slate-950 font-bold shadow-md'
+                        : 'text-slate-400 hover:text-slate-200 hover:bg-slate-800 font-medium'
+                    }`}
+                  >
+                    <span>{opt.label}</span>
+                    <span
+                      className={`text-[9px] px-1 py-0.2 rounded font-mono ${
+                        cameras.length === opt.count
+                          ? 'bg-emerald-800/40 text-slate-950 font-semibold'
+                          : 'bg-slate-800 text-slate-400'
+                      }`}
+                    >
+                      {opt.tag}
+                    </span>
+                  </button>
+                ))}
+              </div>
+            </div>
+
+            <div className="flex items-center justify-between pt-1">
+              <span className="font-semibold text-slate-200 text-xs">
+                Configured Studio Cameras ({cameras.length === 1 ? '1 Camera Active' : `${cameras.length} Cameras Active`})
+              </span>
+              <span className="text-[10px] font-mono text-emerald-400 bg-emerald-950/80 px-2 py-0.5 rounded border border-emerald-800/80">
+                {cameras.length === 1 ? '1-CAMERA READY' : `${cameras.length}-CAMERAS READY`}
+              </span>
+            </div>
 
             <div className="space-y-3">
               {cameras.map((cam) => (

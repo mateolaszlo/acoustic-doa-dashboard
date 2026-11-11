@@ -193,7 +193,7 @@ export interface RoomLayoutConfig {
   tableWidthRatio: number; // 0.3 .. 0.8
   tableHeightRatio: number; // 0.2 .. 0.6 (Length)
   seatCount: number; // 2 .. 16
-  customChairs?: CustomChair[];
+  customChairs?: CustomChair[] | null;
   speaker1SeatAngleDeg?: number;
   speaker2SeatAngleDeg?: number;
 }
