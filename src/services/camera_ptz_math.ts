@@ -7,6 +7,11 @@
 
 import { SpatialZone, VirtualCamera, CameraDirectorConfig, RoomLayoutConfig, CustomChair } from '../types/api_types';
 
+export const BASE_ROOM_WIDTH = 850;
+export const BASE_ROOM_HEIGHT = 470;
+export const BASE_ROOM_CENTER_X = 425;
+export const BASE_ROOM_CENTER_Y = 245;
+
 export const DEFAULT_VIRTUAL_CAMERAS: VirtualCamera[] = [
   {
     id: 'cam-front',

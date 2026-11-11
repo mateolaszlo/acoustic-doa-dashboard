@@ -1,8 +1,17 @@
-import { useState, useRef, useCallback } from 'react';
-import { VirtualCamera, CameraDirectorConfig } from '../types/api_types';
+import { useState, useRef, useEffect, useCallback } from 'react';
+import {
+  VirtualCamera,
+  CameraDirectorConfig,
+  RoomLayoutConfig,
+  DirectorTelemetryState,
+  StudioConfigPayload,
+} from '../types/api_types';
 import {
   DEFAULT_VIRTUAL_CAMERAS,
   DEFAULT_DIRECTOR_CONFIG,
+  DEFAULT_ROOM_LAYOUT,
+  BASE_ROOM_WIDTH,
+  BASE_ROOM_HEIGHT,
   calculateCameraBearing,
   scoreCameraCandidate,
   stepCameraPan,
@@ -16,19 +25,59 @@ export interface ActiveSpeakerTarget {
   splDb: number;
 }
 
-export function useMultiCameraDirector(
-  initialCameras: VirtualCamera[] = DEFAULT_VIRTUAL_CAMERAS,
-  initialConfig: CameraDirectorConfig = DEFAULT_DIRECTOR_CONFIG
-) {
-  const [cameras, setCameras] = useState<VirtualCamera[]>(initialCameras);
-  const [directorConfig, setDirectorConfig] = useState<CameraDirectorConfig>(initialConfig);
-  const [liveCamId, setLiveCamId] = useState<string>('cam-front');
+export interface UseMultiCameraDirectorOptions {
+  deviceId?: number;
+  token?: string | null;
+  isAdmin?: boolean;
+  latestDirectorState?: DirectorTelemetryState | null;
+  latestStudioConfig?: StudioConfigPayload | null;
+}
 
-  // Hysteresis & Schmitt-trigger tracking refs
+export function useMultiCameraDirector({
+  deviceId = 1,
+  token = null,
+  isAdmin = false,
+  latestDirectorState = null,
+  latestStudioConfig = null,
+}: UseMultiCameraDirectorOptions = {}) {
+  // 1. Studio state with offline localStorage fallback
+  const [roomLayout, setRoomLayout] = useState<RoomLayoutConfig>(() => {
+    try {
+      const saved = localStorage.getItem('acoustic_room_layout_config');
+      if (saved) return { ...DEFAULT_ROOM_LAYOUT, ...JSON.parse(saved) };
+    } catch {}
+    return DEFAULT_ROOM_LAYOUT;
+  });
+
+  const [cameras, setCameras] = useState<VirtualCamera[]>(() => {
+    try {
+      const saved = localStorage.getItem('acoustic_cameras_config');
+      if (saved) return JSON.parse(saved);
+    } catch {}
+    return DEFAULT_VIRTUAL_CAMERAS;
+  });
+
+  const [directorConfig, setDirectorConfig] = useState<CameraDirectorConfig>(() => {
+    try {
+      const saved = localStorage.getItem('acoustic_director_config');
+      if (saved) return { ...DEFAULT_DIRECTOR_CONFIG, ...JSON.parse(saved) };
+    } catch {}
+    return DEFAULT_DIRECTOR_CONFIG;
+  });
+
+  const [liveCamId, setLiveCamId] = useState<string>('cam-front');
+  const [activeZoneName, setActiveZoneName] = useState<string>('None');
+  const [isLoadingStudio, setIsLoadingStudio] = useState<boolean>(false);
+
+  // Runtime tracking refs
   const lastSwitchTimeRef = useRef<number>(Date.now());
-  const candidateCamIdRef = useRef<string | null>(null);
-  const candidateStartTimeRef = useRef<number>(0);
   const lastRoomAudioTimeRef = useRef<number>(Date.now());
+
+  const roomLayoutRef = useRef(roomLayout);
+  roomLayoutRef.current = roomLayout;
+
+  const camerasRef = useRef(cameras);
+  camerasRef.current = cameras;
 
   const directorConfigRef = useRef(directorConfig);
   directorConfigRef.current = directorConfig;
@@ -36,22 +85,178 @@ export function useMultiCameraDirector(
   const liveCamIdRef = useRef(liveCamId);
   liveCamIdRef.current = liveCamId;
 
-  const camerasRef = useRef(cameras);
-  camerasRef.current = cameras;
+  const saveTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+
+  // 2. Fetch authoritative studio layout & cameras from backend on mount / deviceId change
+  useEffect(() => {
+    let isCancelled = false;
+    setIsLoadingStudio(true);
+
+    fetch(`/api/v1/devices/${deviceId}/studio`)
+      .then((res) => (res.ok ? res.json() : null))
+      .then((data: StudioConfigPayload | null) => {
+        if (isCancelled || !data) return;
+
+        if (data.roomLayout) {
+          setRoomLayout(data.roomLayout);
+          try {
+            localStorage.setItem('acoustic_room_layout_config', JSON.stringify(data.roomLayout));
+          } catch {}
+        }
+
+        if (data.cameras && Array.isArray(data.cameras)) {
+          // Preserve local currentPanDeg during initial hydration
+          setCameras((prevCams) =>
+            data.cameras.map((c) => {
+              const existing = prevCams.find((p) => p.id === c.id);
+              return {
+                ...c,
+                currentPanDeg: existing?.currentPanDeg ?? c.restingPanDeg,
+              };
+            })
+          );
+          try {
+            localStorage.setItem('acoustic_cameras_config', JSON.stringify(data.cameras));
+          } catch {}
+        }
+
+        if (data.directorConfig) {
+          setDirectorConfig(data.directorConfig);
+          try {
+            localStorage.setItem('acoustic_director_config', JSON.stringify(data.directorConfig));
+          } catch {}
+        }
+
+        if (data.liveCamId) {
+          setLiveCamId(data.liveCamId);
+        }
+
+        if (data.activeZoneName) {
+          setActiveZoneName(data.activeZoneName);
+        }
+      })
+      .catch((err) => {
+        console.warn('[Director] Failed to fetch studio config from backend, using local defaults:', err);
+      })
+      .finally(() => {
+        if (!isCancelled) setIsLoadingStudio(false);
+      });
+
+    return () => {
+      isCancelled = true;
+    };
+  }, [deviceId]);
+
+  // 3. React to real-time SSE studio_config broadcasts from backend
+  useEffect(() => {
+    if (!latestStudioConfig) return;
+
+    if (latestStudioConfig.roomLayout) {
+      setRoomLayout(latestStudioConfig.roomLayout);
+    }
+    if (latestStudioConfig.cameras && Array.isArray(latestStudioConfig.cameras)) {
+      setCameras((prev) =>
+        latestStudioConfig.cameras.map((c) => {
+          const ex = prev.find((p) => p.id === c.id);
+          return { ...c, currentPanDeg: ex?.currentPanDeg ?? c.restingPanDeg };
+        })
+      );
+    }
+    if (latestStudioConfig.directorConfig) {
+      setDirectorConfig(latestStudioConfig.directorConfig);
+    }
+    if (latestStudioConfig.liveCamId) {
+      setLiveCamId(latestStudioConfig.liveCamId);
+    }
+    if (latestStudioConfig.activeZoneName) {
+      setActiveZoneName(latestStudioConfig.activeZoneName);
+    }
+  }, [latestStudioConfig]);
+
+  // 4. React to real-time authoritative PTZ director telemetry from measurement stream
+  useEffect(() => {
+    if (!latestDirectorState) return;
+
+    if (latestDirectorState.liveCamId && latestDirectorState.liveCamId !== liveCamIdRef.current) {
+      setLiveCamId(latestDirectorState.liveCamId);
+    }
+
+    if (latestDirectorState.activeZoneName) {
+      setActiveZoneName(latestDirectorState.activeZoneName);
+    }
+
+    if (Array.isArray(latestDirectorState.cameras)) {
+      setCameras((prevCams) =>
+        prevCams.map((cam) => {
+          const authCam = latestDirectorState.cameras.find((ac) => ac.id === cam.id);
+          if (!authCam) return cam;
+
+          return {
+            ...cam,
+            targetPanDeg: authCam.targetPanDeg,
+            assignedTargetSlot: authCam.assignedTargetSlot,
+            isLockedOnSubject: authCam.isLockedOnSubject,
+            lastTargetPos: authCam.lastTargetPos ?? cam.lastTargetPos,
+            isLive: authCam.id === latestDirectorState.liveCamId,
+          };
+        })
+      );
+    }
+  }, [latestDirectorState]);
+
+  // 5. Debounced backend persistence helper
+  const scheduleBackendSync = useCallback(
+    (
+      payload: Partial<{
+        roomLayout: RoomLayoutConfig;
+        cameras: VirtualCamera[];
+        directorConfig: CameraDirectorConfig;
+        liveCamId: string;
+        reset?: boolean;
+      }>,
+      immediate = false
+    ) => {
+      if (!isAdmin || !token) return;
+
+      if (saveTimeoutRef.current) {
+        clearTimeout(saveTimeoutRef.current);
+        saveTimeoutRef.current = null;
+      }
+
+      const executeSave = async () => {
+        try {
+          await fetch(`/api/v1/devices/${deviceId}/studio`, {
+            method: 'PUT',
+            headers: {
+              'Content-Type': 'application/json',
+              Authorization: `Bearer ${token}`,
+            },
+            body: JSON.stringify(payload),
+          });
+        } catch (err) {
+          console.warn('[Director] Failed to sync studio configuration with backend:', err);
+        }
+      };
+
+      if (immediate) {
+        executeSave();
+      } else {
+        saveTimeoutRef.current = setTimeout(executeSave, 250);
+      }
+    },
+    [deviceId, isAdmin, token]
+  );
 
   /**
-   * Broadcast-grade Camera Assignment & Sticky Memory Engine.
-   *
-   * 1. Assigns ONLY the optimal camera to a speaker (other cameras do NOT swarm to the same speaker).
-   * 2. Sticky Memory: Cameras hold framing on a speaker even during silence/breaths.
-   * 3. Schmitt Trigger: Smoothly cuts the "ON AIR" tally between cameras without hunting.
+   * 60 FPS Animation & Slew-Rate Frame Stepper.
+   * Advances each camera's currentPanDeg smoothly toward authoritative targetPanDeg.
    */
   const processDirectorFrame = useCallback(
     (
       speakers: ActiveSpeakerTarget[],
-      roomWidth: number,
-      roomHeight: number,
-      dtSec: number
+      roomWidth: number = BASE_ROOM_WIDTH,
+      roomHeight: number = BASE_ROOM_HEIGHT,
+      dtSec: number = 0.016
     ): { activeCamera: VirtualCamera | null; switched: boolean } => {
       const now = Date.now();
       const config = directorConfigRef.current;
@@ -63,197 +268,85 @@ export function useMultiCameraDirector(
         lastRoomAudioTimeRef.current = now;
       }
 
-      // Step 1: Manage Camera-to-Speaker Subject Allocation
-      // 1a. Release camera bindings for speaker slots that are no longer active
-      const activeSlotIds = new Set(activeSpeakers.map((s) => s.slotId));
-      currentCameras = currentCameras.map((c) => {
-        if (c.assignedTargetSlot !== null && !activeSlotIds.has(c.assignedTargetSlot)) {
-          return { ...c, assignedTargetSlot: null, isLockedOnSubject: false };
-        }
-        return c;
-      });
+      // If no backend director telemetry is connected, run local target computation
+      const hasRecentBackendTelemetry =
+        latestDirectorState && now - (latestDirectorState.updatedAtMs || 0) < 2000;
 
-      // 1b. Bind active speakers to optimal cameras
-      if (activeSpeakers.length === 1) {
-        // Solo speaker: assign to the single best camera in the room
-        const spk = activeSpeakers[0];
-        const scored = currentCameras.map((cam) => ({
-          cam,
-          score: scoreCameraCandidate(cam, spk.pos, spk.angleDeg, roomWidth, roomHeight),
-        }));
-        scored.sort((a, b) => b.score - a.score);
+      if (!hasRecentBackendTelemetry) {
+        // Fallback local allocation
+        const activeSlotIds = new Set(activeSpeakers.map((s) => s.slotId));
+        currentCameras = currentCameras.map((c) => {
+          if (c.assignedTargetSlot !== null && !activeSlotIds.has(c.assignedTargetSlot)) {
+            return { ...c, assignedTargetSlot: null, isLockedOnSubject: false };
+          }
+          return c;
+        });
 
-        if (scored.length > 0) {
-          const bestCam = scored[0].cam;
-          currentCameras = currentCameras.map((c) =>
-            c.id === bestCam.id
-              ? {
-                  ...c,
-                  assignedTargetSlot: spk.slotId,
-                  isLockedOnSubject: true,
-                  lastTargetPos: spk.pos,
-                }
-              : c.assignedTargetSlot === spk.slotId
-              ? { ...c, assignedTargetSlot: null, isLockedOnSubject: false }
-              : c
-          );
-        }
-      } else if (activeSpeakers.length > 1) {
-        // Multi-speaker discussion: assign dedicated cameras to each speaker
-        for (const speaker of activeSpeakers) {
-          let boundCam = currentCameras.find((c) => c.assignedTargetSlot === speaker.slotId);
+        if (activeSpeakers.length === 1) {
+          const spk = activeSpeakers[0];
+          const scored = currentCameras.map((cam) => ({
+            cam,
+            score: scoreCameraCandidate(cam, spk.pos, spk.angleDeg, roomWidth, roomHeight),
+          }));
+          scored.sort((a, b) => b.score - a.score);
 
-          if (!boundCam) {
-            const availableCams = currentCameras.filter((c) => c.assignedTargetSlot === null);
-            const pool = availableCams.length > 0 ? availableCams : currentCameras;
-
-            const scored = pool.map((cam) => ({
-              cam,
-              score: scoreCameraCandidate(cam, speaker.pos, speaker.angleDeg, roomWidth, roomHeight),
-            }));
-            scored.sort((a, b) => b.score - a.score);
-
-            if (scored.length > 0) {
-              boundCam = scored[0].cam;
-              currentCameras = currentCameras.map((c) =>
-                c.id === boundCam!.id
-                  ? {
-                      ...c,
-                      assignedTargetSlot: speaker.slotId,
-                      isLockedOnSubject: true,
-                      lastTargetPos: speaker.pos,
-                    }
-                  : c.assignedTargetSlot === speaker.slotId
-                  ? { ...c, assignedTargetSlot: null, isLockedOnSubject: false }
-                  : c
-              );
-            }
-          } else {
-            // Update last target position for persistent sticky framing
+          if (scored.length > 0) {
+            const bestCam = scored[0].cam;
             currentCameras = currentCameras.map((c) =>
-              c.id === boundCam!.id ? { ...c, lastTargetPos: speaker.pos } : c
+              c.id === bestCam.id
+                ? {
+                    ...c,
+                    assignedTargetSlot: spk.slotId,
+                    isLockedOnSubject: true,
+                    lastTargetPos: spk.pos,
+                  }
+                : c.assignedTargetSlot === spk.slotId
+                ? { ...c, assignedTargetSlot: null, isLockedOnSubject: false }
+                : c
             );
           }
         }
-      }
 
-      // Step 2: Compute target pan bearings for each camera independently
-      currentCameras = currentCameras.map((cam) => {
-        const camX = cam.xRatio * roomWidth;
-        const camY = cam.yRatio * roomHeight;
+        // Compute pan target
+        currentCameras = currentCameras.map((cam) => {
+          const camX = cam.xRatio * roomWidth;
+          const camY = cam.yRatio * roomHeight;
 
-        // If camera is bound to an active speaker
-        if (cam.assignedTargetSlot !== null) {
-          const boundSpeaker = speakers.find((s) => s.slotId === cam.assignedTargetSlot);
-          const targetPos = boundSpeaker?.pos || cam.lastTargetPos;
+          if (cam.assignedTargetSlot !== null) {
+            const boundSpeaker = speakers.find((s) => s.slotId === cam.assignedTargetSlot);
+            const targetPos = boundSpeaker?.pos || cam.lastTargetPos;
+            if (targetPos) {
+              return {
+                ...cam,
+                targetPanDeg: calculateCameraBearing(camX, camY, targetPos.x, targetPos.y),
+                isLockedOnSubject: true,
+              };
+            }
+          }
 
-          if (targetPos) {
-            const aimAngle = calculateCameraBearing(camX, camY, targetPos.x, targetPos.y);
+          const isProlongedSilence = now - lastRoomAudioTimeRef.current > 45000;
+          if (cam.lastTargetPos && !isProlongedSilence) {
             return {
               ...cam,
-              targetPanDeg: aimAngle,
+              targetPanDeg: calculateCameraBearing(camX, camY, cam.lastTargetPos.x, cam.lastTargetPos.y),
               isLockedOnSubject: true,
             };
           }
-        }
 
-        // Camera is not bound to an active speaker
-        // Sticky Memory: If it previously had a target and room silence is < 45s, HOLD position!
-        const isProlongedSilence = now - lastRoomAudioTimeRef.current > 45000;
-        if (cam.lastTargetPos && !isProlongedSilence) {
-          const holdAngle = calculateCameraBearing(camX, camY, cam.lastTargetPos.x, cam.lastTargetPos.y);
           return {
             ...cam,
-            targetPanDeg: holdAngle,
-            isLockedOnSubject: true,
+            targetPanDeg: cam.restingPanDeg,
+            isLockedOnSubject: false,
           };
-        }
-
-        // Otherwise, hold resting pan angle
-        return {
-          ...cam,
-          targetPanDeg: cam.restingPanDeg,
-          isLockedOnSubject: false,
-        };
-      });
-
-      // Step 3: Schmitt-Trigger & Live Tally Switcher ("ON AIR" Selection)
-      let newLiveId = currentLiveId;
-      let hasSwitched = false;
-
-      // Find the speaker who is speaking with highest volume right now
-      const dominantSpeaker = activeSpeakers.sort((a, b) => b.splDb - a.splDb)[0];
-
-      if (dominantSpeaker) {
-        // Find which camera is framing this dominant speaker
-        const targetCam = currentCameras.find((c) => c.assignedTargetSlot === dominantSpeaker.slotId);
-
-        if (targetCam && targetCam.id !== currentLiveId) {
-          const currentLiveCam = currentCameras.find((c) => c.id === currentLiveId);
-          const isCurrentLiveTrackingActiveSpeaker =
-            currentLiveCam &&
-            currentLiveCam.assignedTargetSlot !== null &&
-            activeSpeakers.some((s) => s.slotId === currentLiveCam.assignedTargetSlot);
-
-          const timeSinceLastSwitch = now - lastSwitchTimeRef.current;
-
-          // If the currently live camera is NOT tracking any active speaker,
-          // cut immediately to the camera that IS framing the talking speaker!
-          if (!isCurrentLiveTrackingActiveSpeaker) {
-            if (candidateCamIdRef.current !== targetCam.id) {
-              candidateCamIdRef.current = targetCam.id;
-              candidateStartTimeRef.current = now;
-            } else if (now - candidateStartTimeRef.current >= Math.min(config.confirmTimeMs, 150)) {
-              newLiveId = targetCam.id;
-              hasSwitched = true;
-              lastSwitchTimeRef.current = now;
-              candidateCamIdRef.current = null;
-              setLiveCamId(newLiveId);
-            }
-          } else {
-            // Both cameras are framing active speakers -> Apply Schmitt-trigger hysteresis
-            const liveScore = scoreCameraCandidate(
-              currentLiveCam!,
-              dominantSpeaker.pos,
-              dominantSpeaker.angleDeg,
-              roomWidth,
-              roomHeight
-            );
-            const targetScore = scoreCameraCandidate(
-              targetCam,
-              dominantSpeaker.pos,
-              dominantSpeaker.angleDeg,
-              roomWidth,
-              roomHeight
-            );
-            const threshold = liveScore * (1.0 + config.hysteresisMarginPercent / 100.0);
-
-            if (timeSinceLastSwitch >= config.holdTimeMs && targetScore >= threshold) {
-              if (candidateCamIdRef.current !== targetCam.id) {
-                candidateCamIdRef.current = targetCam.id;
-                candidateStartTimeRef.current = now;
-              } else if (now - candidateStartTimeRef.current >= config.confirmTimeMs) {
-                newLiveId = targetCam.id;
-                hasSwitched = true;
-                lastSwitchTimeRef.current = now;
-                candidateCamIdRef.current = null;
-                setLiveCamId(newLiveId);
-              }
-            } else {
-              candidateCamIdRef.current = null;
-            }
-          }
-        } else {
-          candidateCamIdRef.current = null;
-        }
+        });
       }
 
-      // Step 4: Advance camera pan motors (Snappy 120°/s or instant cuts)
+      // Slew camera pan motors toward targetPanDeg at 60 FPS
       const updatedCameras = currentCameras.map((cam) => {
-        const isLive = cam.id === newLiveId;
+        const isLive = cam.id === currentLiveId;
         let newPan = cam.currentPanDeg;
 
-        if (config.instantCut && isLive && hasSwitched) {
+        if (config.instantCut && isLive) {
           newPan = cam.targetPanDeg;
         } else {
           newPan = stepCameraPan(
@@ -276,49 +369,99 @@ export function useMultiCameraDirector(
       setCameras(updatedCameras);
 
       return {
-        activeCamera: updatedCameras.find((c) => c.id === newLiveId) || null,
-        switched: hasSwitched,
+        activeCamera: updatedCameras.find((c) => c.id === currentLiveId) || null,
+        switched: false,
       };
     },
-    []
+    [latestDirectorState]
   );
 
-  const setManualLiveCamera = useCallback((id: string) => {
-    setLiveCamId(id);
-    lastSwitchTimeRef.current = Date.now();
-    setCameras((prev) =>
-      prev.map((c) => ({
-        ...c,
-        isLive: c.id === id,
-      }))
-    );
-  }, []);
+  // User actions with local immediate update + debounced backend persistence
+  const updateRoomLayout = useCallback(
+    (partial: Partial<RoomLayoutConfig>) => {
+      setRoomLayout((prev) => {
+        const next = { ...prev, ...partial };
+        try {
+          localStorage.setItem('acoustic_room_layout_config', JSON.stringify(next));
+        } catch {}
+        scheduleBackendSync({ roomLayout: next }, false);
+        return next;
+      });
+    },
+    [scheduleBackendSync]
+  );
 
-  const updateCamera = useCallback((id: string, partial: Partial<VirtualCamera>) => {
-    setCameras((prev) =>
-      prev.map((c) => (c.id === id ? { ...c, ...partial } : c))
-    );
-  }, []);
+  const updateCamera = useCallback(
+    (id: string, partial: Partial<VirtualCamera>) => {
+      setCameras((prev) => {
+        const next = prev.map((c) => (c.id === id ? { ...c, ...partial } : c));
+        try {
+          localStorage.setItem('acoustic_cameras_config', JSON.stringify(next));
+        } catch {}
+        scheduleBackendSync({ cameras: next }, false);
+        return next;
+      });
+    },
+    [scheduleBackendSync]
+  );
 
-  const updateConfig = useCallback((partial: Partial<CameraDirectorConfig>) => {
-    setDirectorConfig((prev) => ({ ...prev, ...partial }));
-  }, []);
+  const updateConfig = useCallback(
+    (partial: Partial<CameraDirectorConfig>) => {
+      setDirectorConfig((prev) => {
+        const next = { ...prev, ...partial };
+        try {
+          localStorage.setItem('acoustic_director_config', JSON.stringify(next));
+        } catch {}
+        scheduleBackendSync({ directorConfig: next }, true);
+        return next;
+      });
+    },
+    [scheduleBackendSync]
+  );
+
+  const setManualLiveCamera = useCallback(
+    (id: string) => {
+      setLiveCamId(id);
+      lastSwitchTimeRef.current = Date.now();
+      setCameras((prev) =>
+        prev.map((c) => ({
+          ...c,
+          isLive: c.id === id,
+        }))
+      );
+      scheduleBackendSync({ liveCamId: id }, true);
+    },
+    [scheduleBackendSync]
+  );
 
   const resetToDefaults = useCallback(() => {
+    setRoomLayout(DEFAULT_ROOM_LAYOUT);
     setCameras(DEFAULT_VIRTUAL_CAMERAS);
     setDirectorConfig(DEFAULT_DIRECTOR_CONFIG);
     setLiveCamId('cam-front');
     lastSwitchTimeRef.current = Date.now();
-  }, []);
+
+    try {
+      localStorage.setItem('acoustic_room_layout_config', JSON.stringify(DEFAULT_ROOM_LAYOUT));
+      localStorage.setItem('acoustic_cameras_config', JSON.stringify(DEFAULT_VIRTUAL_CAMERAS));
+      localStorage.setItem('acoustic_director_config', JSON.stringify(DEFAULT_DIRECTOR_CONFIG));
+    } catch {}
+
+    scheduleBackendSync({ reset: true }, true);
+  }, [scheduleBackendSync]);
 
   return {
+    roomLayout,
     cameras,
     liveCamId,
     directorConfig,
+    activeZoneName,
+    isLoadingStudio,
     processDirectorFrame,
     setManualLiveCamera,
     updateCamera,
     updateConfig,
+    updateRoomLayout,
     resetToDefaults,
   };
 }

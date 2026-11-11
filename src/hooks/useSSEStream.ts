@@ -1,5 +1,11 @@
 import { useState, useEffect, useRef, useCallback } from 'react';
-import { MeasurementBatchPayload, MeasurementEvent, AcousticTrack } from '../types/api_types.js';
+import {
+  MeasurementBatchPayload,
+  MeasurementEvent,
+  AcousticTrack,
+  DirectorTelemetryState,
+  StudioConfigPayload,
+} from '../types/api_types.js';
 
 interface UseSSEStreamOptions {
   deviceId: number;
@@ -9,6 +15,8 @@ interface UseSSEStreamOptions {
 export function useSSEStream({ deviceId, maxBufferLength = 500 }: UseSSEStreamOptions) {
   const [connected, setConnected] = useState(false);
   const [latestBatch, setLatestBatch] = useState<MeasurementBatchPayload | null>(null);
+  const [latestDirectorState, setLatestDirectorState] = useState<DirectorTelemetryState | null>(null);
+  const [latestStudioConfig, setLatestStudioConfig] = useState<StudioConfigPayload | null>(null);
   const [recentEvents, setRecentEvents] = useState<MeasurementEvent[]>([]);
   const [activeTracks, setActiveTracks] = useState<AcousticTrack[]>([]);
   const [bufferLimit, setBufferLimit] = useState<number>(maxBufferLength);
@@ -62,6 +70,10 @@ export function useSSEStream({ deviceId, maxBufferLength = 500 }: UseSSEStreamOp
           setActiveTracks(batch.activeTracks);
         }
 
+        if (batch.director) {
+          setLatestDirectorState(batch.director);
+        }
+
         // Group batch records by timestampMs (each distinct timestamp is an FFT frame;
         // multiple records with the same timestamp are simultaneous CLEAN detections: Primary -> Secondary -> Tertiary).
         // Reverse frame order so newest frame is first, but preserve Primary -> Secondary -> Tertiary
@@ -82,6 +94,15 @@ export function useSSEStream({ deviceId, maxBufferLength = 500 }: UseSSEStreamOp
         });
       } catch (err) {
         console.error('[SSE] Failed to parse measurement batch:', err);
+      }
+    });
+
+    es.addEventListener('studio_config', (event) => {
+      try {
+        const studio: StudioConfigPayload = JSON.parse(event.data);
+        setLatestStudioConfig(studio);
+      } catch (err) {
+        console.error('[SSE] Failed to parse studio_config event:', err);
       }
     });
 
@@ -141,6 +162,8 @@ export function useSSEStream({ deviceId, maxBufferLength = 500 }: UseSSEStreamOp
   return {
     connected,
     latestBatch,
+    latestDirectorState,
+    latestStudioConfig,
     recentEvents,
     activeTracks,
     bufferLimit,

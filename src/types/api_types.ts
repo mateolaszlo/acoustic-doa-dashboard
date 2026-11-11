@@ -46,6 +46,7 @@ export interface MeasurementBatchPayload {
   crcVerified?: boolean;
   records: MeasurementEvent[];
   activeTracks?: AcousticTrack[];
+  director?: DirectorTelemetryState | null;
 }
 
 export interface DeviceCalibration {
@@ -220,6 +221,33 @@ export interface CameraDirectorConfig {
   holdTimeMs: number; // e.g. 1800ms
   confirmTimeMs: number; // e.g. 350ms
   hysteresisMarginPercent: number; // e.g. 20%
+}
+
+export interface DirectorTelemetrySpeaker {
+  slotId: number;
+  pos: { x: number; y: number };
+  angleDeg: number;
+  isActive: boolean;
+  splDb: number;
+}
+
+export interface DirectorTelemetryState {
+  liveCamId: string;
+  activeZoneName: string;
+  updatedAtMs: number;
+  switched: boolean;
+  speakers: DirectorTelemetrySpeaker[];
+  cameras: VirtualCamera[];
+}
+
+export interface StudioConfigPayload {
+  deviceId: number;
+  roomLayout: RoomLayoutConfig;
+  cameras: VirtualCamera[];
+  directorConfig: CameraDirectorConfig;
+  liveCamId: string;
+  activeZoneName?: string;
+  updatedAt?: string;
 }
 
 
