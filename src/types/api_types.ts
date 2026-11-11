@@ -107,3 +107,67 @@ export interface UserRecord {
   last_login_at: string | null;
 }
 
+export type DashboardMode = 'MEETING' | 'DSP';
+
+export interface SpatialZone {
+  id?: number;
+  device_id?: number;
+  name: string;
+  min_angle_deg: number;
+  max_angle_deg: number;
+  color: string;
+  alert_threshold_db?: number;
+  created_at?: string;
+}
+
+export interface SpeakerSessionStats {
+  slotId: number; // 0 or 1
+  isActive: boolean;
+  currentAngleDeg: number | null;
+  currentZone: string;
+  currentSplDb: number;
+  totalSpeakingTimeMs: number;
+  turnCount: number;
+  lastActiveMs: number;
+}
+
+export interface DiarizationTimelineSegment {
+  id: string;
+  timestampMs: number;
+  slotId: number; // 0 = Speaker 1 (Emerald), 1 = Speaker 2 (Indigo)
+  durationMs: number;
+  zoneName: string;
+  avgSplDb: number;
+  isCrossTalk: boolean;
+}
+
+export interface MeetingSessionAnalytics {
+  totalDurationMs: number;
+  speaker0TimeMs: number;
+  speaker1TimeMs: number;
+  crossTalkTimeMs: number;
+  silenceTimeMs: number;
+  speaker0Turns: number;
+  speaker1Turns: number;
+  crossTalkCount: number;
+}
+
+export interface MultipathReflection {
+  slotId: number;
+  angleDeg: number;
+  delayUs: number;
+  soundLevelDb: number;
+  confidence: number;
+  deltaAngleDeg: number;
+  relativeSplDb: number;
+}
+
+export interface MultipathMetrics {
+  directSplDb: number;
+  reverbSplDb: number;
+  drrDb: number;
+  reverbState: 'DRY' | 'CONTROLLED' | 'REVERBERANT';
+  reflections: MultipathReflection[];
+}
+
+

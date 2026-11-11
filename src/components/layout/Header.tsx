@@ -1,7 +1,7 @@
 import React, { useState, useEffect } from 'react';
-import { Radar, Radio, BookOpen, Shield, LogIn, LogOut, User, Volume2, VolumeX, RefreshCw } from 'lucide-react';
+import { Radar, Radio, BookOpen, Shield, LogIn, LogOut, User, Volume2, VolumeX, RefreshCw, Camera, Lock } from 'lucide-react';
 import { useAuth } from '../../context/AuthContext.js';
-import { DeviceSummary } from '../../types/api_types.js';
+import { DeviceSummary, DashboardMode } from '../../types/api_types.js';
 
 interface HeaderProps {
   deviceId: number;
@@ -9,6 +9,8 @@ interface HeaderProps {
   eventCount: number;
   globalEventCount?: number;
   isAudioEnabled: boolean;
+  mode: DashboardMode;
+  onChangeMode: (mode: DashboardMode) => void;
   onToggleAudio: () => void;
   onOpenAuth: () => void;
   onSelectDevice?: (id: number) => void;
@@ -21,6 +23,8 @@ export const Header: React.FC<HeaderProps> = ({
   eventCount,
   globalEventCount,
   isAudioEnabled,
+  mode,
+  onChangeMode,
   onToggleAudio,
   onOpenAuth,
   onSelectDevice,
@@ -61,6 +65,40 @@ export const Header: React.FC<HeaderProps> = ({
               Quad-MEMS Planar Array &bull; Real-Time Sound Source Localization
             </p>
           </div>
+        </div>
+
+        {/* Dual Mode Switcher: Smart Meeting Director vs DSP Lab */}
+        <div className="flex items-center p-1 rounded-xl bg-slate-900 border border-slate-800 text-xs">
+          <button
+            onClick={() => onChangeMode('MEETING')}
+            className={`flex items-center space-x-1.5 px-3 py-1.5 rounded-lg font-medium transition ${
+              mode === 'MEETING'
+                ? 'bg-emerald-600 text-slate-950 font-bold shadow-md shadow-emerald-950/60'
+                : 'text-slate-400 hover:text-slate-200'
+            }`}
+          >
+            <Camera className="w-3.5 h-3.5" />
+            <span>Meeting Director</span>
+          </button>
+          <button
+            onClick={() => {
+              if (!isAdmin) {
+                onOpenAuth();
+              } else {
+                onChangeMode('DSP');
+              }
+            }}
+            className={`flex items-center space-x-1.5 px-3 py-1.5 rounded-lg font-medium transition ${
+              mode === 'DSP'
+                ? 'bg-purple-600 text-white font-bold shadow-md shadow-purple-950/60'
+                : 'text-slate-400 hover:text-slate-200'
+            }`}
+            title={isAdmin ? 'Switch to DSP Engineering Bench' : 'Sign in as Administrator to access low-level DSP Bench'}
+          >
+            <Radio className="w-3.5 h-3.5" />
+            <span>DSP Lab</span>
+            {!isAdmin && <Lock className="w-3 h-3 text-slate-500" />}
+          </button>
         </div>
 
         {/* Station Controls & Badges */}
