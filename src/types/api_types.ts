@@ -170,4 +170,27 @@ export interface MultipathMetrics {
   reflections: MultipathReflection[];
 }
 
+export interface VirtualCamera {
+  id: string; // 'cam-front', 'cam-rear', 'cam-side'
+  name: string; // 'Front Stage Cam', 'Rear Audience Cam', 'Side Profile Cam'
+  xRatio: number; // 0..1 (fraction of canvas width)
+  yRatio: number; // 0..1 (fraction of canvas height)
+  restingPanDeg: number; // Default resting pan angle
+  currentPanDeg: number;
+  targetPanDeg: number;
+  fovDeg: number; // e.g. 60°
+  color: string;
+  isLive: boolean; // "ON AIR"
+  role: 'front' | 'rear' | 'side';
+}
+
+export interface CameraDirectorConfig {
+  slewSpeedDegPerSec: number; // e.g. 120°/s
+  instantCut: boolean; // true = instant broadcast cut, false = smooth slew
+  holdTimeMs: number; // e.g. 1800ms
+  confirmTimeMs: number; // e.g. 350ms
+  hysteresisMarginPercent: number; // e.g. 20%
+}
+
+
 

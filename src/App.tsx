@@ -13,10 +13,12 @@ import { ActiveSpeakerCards } from './components/conference/ActiveSpeakerCards.j
 import { DiarizationTimeline } from './components/conference/DiarizationTimeline.js';
 import { MultipathAnalyzerCard } from './components/diagnostics/MultipathAnalyzerCard.js';
 import { SpatialZoneEditorModal } from './components/diagnostics/SpatialZoneEditorModal.js';
+import { CameraStudioConfigModal } from './components/conference/CameraStudioConfigModal.js';
 import { useSSEStream } from './hooks/useSSEStream.js';
 import { useDeviceConfig } from './hooks/useDeviceConfig.js';
 import { useSpatialZones } from './hooks/useSpatialZones.js';
 import { useMeetingDiarization } from './hooks/useMeetingDiarization.js';
+import { useMultiCameraDirector } from './hooks/useMultiCameraDirector.js';
 import { useAuth } from './context/AuthContext.js';
 import { playSonarPing } from './services/audio_chime.js';
 import { DashboardMode } from './types/api_types.js';
@@ -31,6 +33,7 @@ export function App() {
   const { token, isAdmin } = useAuth();
   const [isAuthModalOpen, setIsAuthModalOpen] = useState(false);
   const [isZoneEditorOpen, setIsZoneEditorOpen] = useState(false);
+  const [isStudioModalOpen, setIsStudioModalOpen] = useState(false);
   const [activeTab, setActiveTab] = useState<TabType>('analytics');
 
   // Real-time Server-Sent Events stream from backend
@@ -76,6 +79,18 @@ export function App() {
     analytics,
     resetMeetingSession,
   } = useMeetingDiarization(activeTracks, primaryEvent, zones, connected);
+
+  // Smart Multi-Camera Director Studio & Schmitt-Trigger Hysteresis
+  const {
+    cameras,
+    liveCamId,
+    directorConfig,
+    processDirectorFrame,
+    setManualLiveCamera,
+    updateCamera,
+    updateConfig: updateDirectorConfig,
+    resetToDefaults: resetDirectorDefaults,
+  } = useMultiCameraDirector();
 
   // If role changes or user logs out while in admin mode or viewing an admin-only tab, fall back
   useEffect(() => {
@@ -140,11 +155,16 @@ export function App() {
               )}
             </div>
 
-            {/* Smart 2D Conference Room Canvas with Simulated PTZ Camera */}
+            {/* Smart 2D Conference Room Canvas with Multi-Camera Studio Director */}
             <SmartRoomDirectorCanvas
               activeTracks={activeTracks}
               latestEvents={recentEvents}
               zones={zones}
+              cameras={cameras}
+              liveCamId={liveCamId}
+              onProcessFrame={processDirectorFrame}
+              onSelectManualLiveCam={setManualLiveCamera}
+              onOpenStudioSettings={() => setIsStudioModalOpen(true)}
             />
 
             {/* Active Speaker Diarization Cards & Balance Monitor */}
@@ -392,6 +412,17 @@ export function App() {
         onClose={() => setIsZoneEditorOpen(false)}
         zones={zones}
         onSave={saveZones}
+      />
+
+      {/* Camera Studio Setup & Director Tuning Modal */}
+      <CameraStudioConfigModal
+        isOpen={isStudioModalOpen}
+        onClose={() => setIsStudioModalOpen(false)}
+        cameras={cameras}
+        config={directorConfig}
+        onUpdateCamera={updateCamera}
+        onUpdateConfig={updateDirectorConfig}
+        onResetDefaults={resetDirectorDefaults}
       />
 
       {/* Authentication / Registration Modal */}
