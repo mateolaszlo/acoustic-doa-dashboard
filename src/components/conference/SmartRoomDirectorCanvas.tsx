@@ -10,6 +10,7 @@ import {
 import {
   calculateTablePerimeterPos,
   resolveSpatialZone,
+  computeCameraFovPoints,
   DEFAULT_ROOM_LAYOUT,
   computeDefaultChairs,
   BASE_ROOM_WIDTH,
@@ -18,6 +19,7 @@ import {
   BASE_ROOM_CENTER_Y,
 } from '../../services/camera_ptz_math';
 import { ActiveSpeakerTarget } from '../../hooks/useMultiCameraDirector';
+import { drawRoundedRect } from '../../services/radar_math.js';
 import {
   Camera,
   Radio,
@@ -50,7 +52,7 @@ interface SmartRoomDirectorCanvasProps {
     roomWidth: number,
     roomHeight: number,
     dtSec: number
-  ) => { activeCamera: VirtualCamera | null; switched: boolean };
+  ) => { activeCamera: VirtualCamera | null };
   onSelectManualLiveCam: (camId: string) => void;
   onOpenStudioSettings: () => void;
   onSetCameraCount?: (count: number) => void;
@@ -569,11 +571,7 @@ export const SmartRoomDirectorCanvas: React.FC<SmartRoomDirectorCanvasProps> = (
       if (layout.tableShape === 'oval') {
         // Boardroom Oval Table
         ctx.beginPath();
-        if (ctx.roundRect) {
-          ctx.roundRect(tableX, tableY, tableWidth, tableHeight, 26);
-        } else {
-          ctx.rect(tableX, tableY, tableWidth, tableHeight);
-        }
+        drawRoundedRect(ctx, tableX, tableY, tableWidth, tableHeight, 26);
         ctx.fillStyle = '#1e293b';
         ctx.fill();
         ctx.shadowBlur = 0;
@@ -652,11 +650,7 @@ export const SmartRoomDirectorCanvas: React.FC<SmartRoomDirectorCanvasProps> = (
         // Hollow Square Executive Table
         const wallThick = Math.max(28, Math.min(tableWidth * 0.2, tableHeight * 0.28));
         ctx.beginPath();
-        if (ctx.roundRect) {
-          ctx.roundRect(tableX, tableY, tableWidth, tableHeight, 8);
-        } else {
-          ctx.rect(tableX, tableY, tableWidth, tableHeight);
-        }
+        drawRoundedRect(ctx, tableX, tableY, tableWidth, tableHeight, 8);
         ctx.fillStyle = '#1e293b';
         ctx.fill();
         ctx.shadowBlur = 0;
@@ -951,11 +945,7 @@ export const SmartRoomDirectorCanvas: React.FC<SmartRoomDirectorCanvasProps> = (
         const pillY = labelY - pillH / 2;
 
         ctx.fillStyle = isLive ? 'rgba(16, 185, 129, 0.95)' : 'rgba(15, 23, 42, 0.9)';
-        if (ctx.roundRect) {
-          ctx.roundRect(pillX, pillY, pillW, pillH, 5);
-        } else {
-          ctx.rect(pillX, pillY, pillW, pillH);
-        }
+        drawRoundedRect(ctx, pillX, pillY, pillW, pillH, 5);
         ctx.fill();
 
         ctx.strokeStyle = isLive ? '#34d399' : '#334155';
@@ -1001,11 +991,7 @@ export const SmartRoomDirectorCanvas: React.FC<SmartRoomDirectorCanvasProps> = (
 
           // CRITICAL: beginPath isolates this badge path from all previous paths!
           ctx.beginPath();
-          if (ctx.roundRect) {
-            ctx.roundRect(lx - boxW / 2, ly - boxH / 2, boxW, boxH, 6);
-          } else {
-            ctx.rect(lx - boxW / 2, ly - boxH / 2, boxW, boxH);
-          }
+          drawRoundedRect(ctx, lx - boxW / 2, ly - boxH / 2, boxW, boxH, 6);
           ctx.fillStyle = 'rgba(9, 13, 22, 0.94)';
           ctx.fill();
           ctx.strokeStyle = zone.color;
@@ -1341,7 +1327,7 @@ export const SmartRoomDirectorCanvas: React.FC<SmartRoomDirectorCanvasProps> = (
                 onUpdateRoomLayout({
                   tableWidthRatio: isRound ? 0.44 : 0.42,
                   tableHeightRatio: isRound ? 0.44 : 0.26,
-                  seatCount: isRound ? 6 : 6,
+                  seatCount: 6,
                   customChairs: null,
                 });
               }}
@@ -1525,38 +1511,3 @@ export const SmartRoomDirectorCanvas: React.FC<SmartRoomDirectorCanvasProps> = (
     </div>
   );
 };
-
-/**
- * Computes polygon points for a camera's field-of-view visual frustum cone.
- */
-function computeCameraFovPoints(
-  camX: number,
-  camY: number,
-  panDeg: number,
-  fovDeg: number,
-  coneRadius: number
-): { leftX: number; leftY: number; rightX: number; rightY: number; arcPoints: { x: number; y: number }[] } {
-  const halfFov = fovDeg / 2;
-  const leftAngleRad = ((panDeg - halfFov - 90) * Math.PI) / 180;
-  const rightAngleRad = ((panDeg + halfFov - 90) * Math.PI) / 180;
-
-  const leftX = camX + Math.cos(leftAngleRad) * coneRadius;
-  const leftY = camY + Math.sin(leftAngleRad) * coneRadius;
-  const rightX = camX + Math.cos(rightAngleRad) * coneRadius;
-  const rightY = camY + Math.sin(rightAngleRad) * coneRadius;
-
-  const arcPoints: { x: number; y: number }[] = [];
-  const steps = 8;
-  for (let i = 1; i < steps; i++) {
-    const fraction = i / steps;
-    const a = leftAngleRad + fraction * (rightAngleRad - leftAngleRad);
-    arcPoints.push({
-      x: camX + Math.cos(a) * coneRadius,
-      y: camY + Math.sin(a) * coneRadius,
-    });
-  }
-
-  return { leftX, leftY, rightX, rightY, arcPoints };
-}
-
-export default SmartRoomDirectorCanvas;

@@ -10,27 +10,18 @@ import {
 } from '../types/api_types';
 import { resolveSpatialZone } from '../services/camera_ptz_math';
 
-const INITIAL_SPEAKER_0: SpeakerSessionStats = {
-  slotId: 0,
+const createInitialSpeaker = (slotId: number): SpeakerSessionStats => ({
+  slotId,
   isActive: false,
   currentAngleDeg: null,
   currentZone: 'Unassigned',
   currentSplDb: 0,
   totalSpeakingTimeMs: 0,
   turnCount: 0,
-  lastActiveMs: 0,
-};
+});
 
-const INITIAL_SPEAKER_1: SpeakerSessionStats = {
-  slotId: 1,
-  isActive: false,
-  currentAngleDeg: null,
-  currentZone: 'Unassigned',
-  currentSplDb: 0,
-  totalSpeakingTimeMs: 0,
-  turnCount: 0,
-  lastActiveMs: 0,
-};
+const INITIAL_SPEAKER_0 = createInitialSpeaker(0);
+const INITIAL_SPEAKER_1 = createInitialSpeaker(1);
 
 const INITIAL_ANALYTICS: MeetingSessionAnalytics = {
   totalDurationMs: 0,
@@ -140,7 +131,6 @@ export function useMeetingDiarization(
         currentSplDb: active0 ? Math.round(spl0 * 10) / 10 : 0,
         totalSpeakingTimeMs: active0 ? prev.totalSpeakingTimeMs + dt : prev.totalSpeakingTimeMs,
         turnCount: turn0Started ? prev.turnCount + 1 : prev.turnCount,
-        lastActiveMs: active0 ? now : prev.lastActiveMs,
       }));
 
       setSpeaker1((prev) => ({
@@ -151,7 +141,6 @@ export function useMeetingDiarization(
         currentSplDb: active1 ? Math.round(spl1 * 10) / 10 : 0,
         totalSpeakingTimeMs: active1 ? prev.totalSpeakingTimeMs + dt : prev.totalSpeakingTimeMs,
         turnCount: turn1Started ? prev.turnCount + 1 : prev.turnCount,
-        lastActiveMs: active1 ? now : prev.lastActiveMs,
       }));
 
       setIsCrossTalk(crossTalk);
@@ -281,5 +270,3 @@ export function useMeetingDiarization(
     resetMeetingSession,
   };
 }
-
-export default useMeetingDiarization;

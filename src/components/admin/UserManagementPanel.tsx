@@ -1,11 +1,11 @@
 import React, { useState, useEffect, useCallback } from 'react';
 import { useAuth } from '../../context/AuthContext.js';
 import { UserRecord, UserRole } from '../../types/api_types.js';
-import { extractApiErrorMessage, formatClientError } from '../../services/error_messages.js';
+import { apiRequestJson } from '../../services/api_client.js';
 import { Users, Shield, User, Trash2, RefreshCw, AlertCircle, CheckCircle2 } from 'lucide-react';
 
 export const UserManagementPanel: React.FC = () => {
-  const { token, isAdmin, user: currentUser } = useAuth();
+  const { isAdmin, user: currentUser } = useAuth();
   const [users, setUsers] = useState<UserRecord[]>([]);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -17,26 +17,16 @@ export const UserManagementPanel: React.FC = () => {
     setError(null);
 
     try {
-      const headers: Record<string, string> = {};
-      if (token) headers['Authorization'] = `Bearer ${token}`;
-      const res = await fetch('/api/v1/users', {
-        credentials: 'include',
-        headers,
+      const data = await apiRequestJson<{ users?: UserRecord[] }>('/api/v1/users', {
+        fallbackError: 'Failed to load users.',
       });
-
-      if (!res.ok) {
-        const message = await extractApiErrorMessage(res, 'Failed to load users.');
-        throw new Error(message);
-      }
-
-      const data = await res.json();
       setUsers(data.users || []);
     } catch (err) {
-      setError(formatClientError(err, 'Failed to load users.'));
+      setError(err instanceof Error ? err.message : 'Failed to load users.');
     } finally {
       setLoading(false);
     }
-  }, [isAdmin, token]);
+  }, [isAdmin]);
 
   useEffect(() => {
     fetchUsers();
@@ -47,26 +37,16 @@ export const UserManagementPanel: React.FC = () => {
     setSuccessMsg(null);
 
     try {
-      const headers: Record<string, string> = { 'Content-Type': 'application/json' };
-      if (token) headers['Authorization'] = `Bearer ${token}`;
-      const res = await fetch(`/api/v1/users/${userId}/role`, {
+      const data = await apiRequestJson<{ message?: string }>(`/api/v1/users/${userId}/role`, {
         method: 'PATCH',
-        credentials: 'include',
-        headers,
         body: JSON.stringify({ role: newRole }),
+        fallbackError: 'Failed to update user role.',
       });
-
-      if (!res.ok) {
-        const message = await extractApiErrorMessage(res, 'Failed to update user role.');
-        throw new Error(message);
-      }
-
-      const data = await res.json();
       setSuccessMsg(data.message || 'User role updated');
       setTimeout(() => setSuccessMsg(null), 4000);
       fetchUsers();
     } catch (err) {
-      setError(formatClientError(err, 'Failed to update user role.'));
+      setError(err instanceof Error ? err.message : 'Failed to update user role.');
     }
   };
 
@@ -79,25 +59,15 @@ export const UserManagementPanel: React.FC = () => {
     setSuccessMsg(null);
 
     try {
-      const headers: Record<string, string> = {};
-      if (token) headers['Authorization'] = `Bearer ${token}`;
-      const res = await fetch(`/api/v1/users/${userId}`, {
+      await apiRequestJson(`/api/v1/users/${userId}`, {
         method: 'DELETE',
-        credentials: 'include',
-        headers,
+        fallbackError: 'Failed to delete user.',
       });
-
-      if (!res.ok) {
-        const message = await extractApiErrorMessage(res, 'Failed to delete user.');
-        throw new Error(message);
-      }
-
-      await res.json().catch(() => null);
       setSuccessMsg(`User '${username}' deleted`);
       setTimeout(() => setSuccessMsg(null), 4000);
       fetchUsers();
     } catch (err) {
-      setError(formatClientError(err, 'Failed to delete user.'));
+      setError(err instanceof Error ? err.message : 'Failed to delete user.');
     }
   };
 
@@ -224,5 +194,3 @@ export const UserManagementPanel: React.FC = () => {
     </div>
   );
 };
-
-export default UserManagementPanel;

@@ -129,7 +129,6 @@ export interface SpeakerSessionStats {
   currentSplDb: number;
   totalSpeakingTimeMs: number;
   turnCount: number;
-  lastActiveMs: number;
 }
 
 export interface DiarizationTimelineSegment {
@@ -194,8 +193,6 @@ export interface RoomLayoutConfig {
   tableHeightRatio: number; // 0.2 .. 0.6 (Length)
   seatCount: number; // 2 .. 16
   customChairs?: CustomChair[] | null;
-  speaker1SeatAngleDeg?: number;
-  speaker2SeatAngleDeg?: number;
 }
 
 export interface VirtualCamera {

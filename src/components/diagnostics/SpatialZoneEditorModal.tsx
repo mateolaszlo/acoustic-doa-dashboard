@@ -276,5 +276,3 @@ export const SpatialZoneEditorModal: React.FC<SpatialZoneEditorModalProps> = ({
     </div>
   );
 };
-
-export default SpatialZoneEditorModal;

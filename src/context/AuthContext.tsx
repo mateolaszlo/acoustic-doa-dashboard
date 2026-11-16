@@ -1,16 +1,14 @@
 import React, { createContext, useContext, useState, useEffect, useCallback } from 'react';
 import { AuthUser } from '../types/api_types.js';
-import { extractApiErrorMessage, formatClientError } from '../services/error_messages.js';
+import { ApiError, apiRequestJson } from '../services/api_client.js';
 
 interface AuthContextType {
   user: AuthUser | null;
-  token: string | null;
   loading: boolean;
   isAuthenticated: boolean;
   isAdmin: boolean;
   sessionError: string | null;
   clearSessionError: () => void;
-  refreshSession: () => Promise<void>;
   login: (username: string, password: string) => Promise<{ success: boolean; error?: string }>;
   register: (username: string, email: string, password: string) => Promise<{ success: boolean; error?: string }>;
   logout: () => Promise<void>;
@@ -18,13 +16,11 @@ interface AuthContextType {
 
 const AuthContext = createContext<AuthContextType>({
   user: null,
-  token: null,
   loading: true,
   isAuthenticated: false,
   isAdmin: false,
   sessionError: null,
   clearSessionError: () => {},
-  refreshSession: async () => {},
   login: async () => ({ success: false }),
   register: async () => ({ success: false }),
   logout: async () => {},
@@ -37,40 +33,6 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
 
   const clearSessionError = useCallback(() => setSessionError(null), []);
 
-  const verifySession = useCallback(async (isCancelled?: () => boolean) => {
-    try {
-      const res = await fetch('/api/v1/auth/me', {
-        credentials: 'include',
-      });
-
-      if (isCancelled?.()) return;
-
-      if (res.ok) {
-        const data = await res.json();
-        if (isCancelled?.()) return;
-        setUser(data?.user ?? null);
-        setSessionError(null);
-        return;
-      }
-
-      if (res.status === 401 || res.status === 403) {
-        setUser(null);
-        return;
-      }
-
-      setUser(null);
-      const msg = await extractApiErrorMessage(res, 'Unable to verify your session.');
-      if (!isCancelled?.()) {
-        setSessionError(msg);
-      }
-    } catch (err) {
-      if (!isCancelled?.()) {
-        setUser(null);
-        setSessionError(formatClientError(err, 'Unable to reach the authentication server.'));
-      }
-    }
-  }, []);
-
   // Verify existing HttpOnly cookie session on initial load (no localStorage token storage)
   useEffect(() => {
     let cancelled = false;
@@ -81,72 +43,69 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
       localStorage.removeItem('acoustic_auth_user');
     } catch {}
 
-    verifySession(() => cancelled).finally(() => {
-      if (!cancelled) setLoading(false);
-    });
+    apiRequestJson<{ user?: AuthUser }>('/api/v1/auth/me', {
+      fallbackError: 'Unable to verify your session.',
+    })
+      .then((data) => {
+        if (!cancelled) {
+          setUser(data?.user ?? null);
+          setSessionError(null);
+        }
+      })
+      .catch((err) => {
+        if (cancelled) return;
+        setUser(null);
+        if (!(err instanceof ApiError && (err.status === 401 || err.status === 403))) {
+          setSessionError(err instanceof Error ? err.message : 'Unable to reach the authentication server.');
+        }
+      })
+      .finally(() => {
+        if (!cancelled) setLoading(false);
+      });
 
     return () => {
       cancelled = true;
     };
-  }, [verifySession]);
+  }, []);
 
-  const refreshSession = useCallback(async () => {
-    await verifySession();
-  }, [verifySession]);
-
-  const login = async (username: string, password: string) => {
+  const submitCredentials = async (
+    endpoint: string,
+    payload: Record<string, string>,
+    incompleteMsg: string,
+    fallbackError: string
+  ) => {
     try {
-      const res = await fetch('/api/v1/auth/login', {
+      const data = await apiRequestJson<{ user?: AuthUser }>(endpoint, {
         method: 'POST',
-        credentials: 'include',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ username, password }),
+        body: JSON.stringify(payload),
+        fallbackError,
       });
-
-      if (!res.ok) {
-        const message = await extractApiErrorMessage(res, 'Sign-in failed.');
-        return { success: false, error: message };
-      }
-
-      const data = await res.json();
       if (!data?.user) {
-        return { success: false, error: 'Server returned an incomplete login response.' };
+        return { success: false, error: incompleteMsg };
       }
-
       setUser(data.user);
       setSessionError(null);
       return { success: true };
     } catch (err) {
-      return { success: false, error: formatClientError(err, 'Unable to sign in right now.') };
+      return { success: false, error: err instanceof Error ? err.message : fallbackError };
     }
   };
 
-  const register = async (username: string, email: string, password: string) => {
-    try {
-      const res = await fetch('/api/v1/auth/register', {
-        method: 'POST',
-        credentials: 'include',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ username, email, password }),
-      });
+  const login = (username: string, password: string) =>
+    submitCredentials(
+      '/api/v1/auth/login',
+      { username, password },
+      'Server returned an incomplete login response.',
+      'Sign-in failed.'
+    );
 
-      if (!res.ok) {
-        const message = await extractApiErrorMessage(res, 'Registration failed.');
-        return { success: false, error: message };
-      }
-
-      const data = await res.json();
-      if (!data?.user) {
-        return { success: false, error: 'Server returned an incomplete registration response.' };
-      }
-
-      setUser(data.user);
-      setSessionError(null);
-      return { success: true };
-    } catch (err) {
-      return { success: false, error: formatClientError(err, 'Unable to create account right now.') };
-    }
-  };
+  const register = (username: string, email: string, password: string) =>
+    submitCredentials(
+      '/api/v1/auth/register',
+      { username, email, password },
+      'Server returned an incomplete registration response.',
+      'Registration failed.'
+    );
 
   const logout = useCallback(async () => {
     try {
@@ -169,13 +128,11 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
     <AuthContext.Provider
       value={{
         user,
-        token: null,
         loading,
         isAuthenticated,
         isAdmin,
         sessionError,
         clearSessionError,
-        refreshSession,
         login,
         register,
         logout,

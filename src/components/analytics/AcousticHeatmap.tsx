@@ -1,6 +1,6 @@
 import { useState, useEffect, useCallback } from 'react';
 import { AcousticStats, MeasurementBatchPayload } from '../../types/api_types.js';
-import { extractApiErrorMessage, formatClientError } from '../../services/error_messages.js';
+import { apiRequestJson } from '../../services/api_client.js';
 import { PieChart, BarChart3, RefreshCw, Compass, RotateCcw, X, AlertCircle } from 'lucide-react';
 
 interface AcousticHeatmapProps {
@@ -29,18 +29,14 @@ export const AcousticHeatmap: React.FC<AcousticHeatmapProps> = ({ deviceId, late
         if (activeSince) {
           url += `&since_ms=${activeSince}`;
         }
-        const res = await fetch(url, { credentials: 'include' });
-        if (!res.ok) {
-          const message = await extractApiErrorMessage(res, 'Failed to load acoustic statistics.');
-          setError(message);
-          return;
-        }
-        const data = await res.json();
+        const data = await apiRequestJson<AcousticStats>(url, {
+          fallbackError: 'Failed to load acoustic statistics.',
+        });
         setStats(data);
         setError(null);
       } catch (err) {
         console.error('Failed to load stats:', err);
-        setError(formatClientError(err, 'Unable to load acoustic statistics.'));
+        setError(err instanceof Error ? err.message : 'Unable to load acoustic statistics.');
       } finally {
         setLoading(false);
       }
@@ -453,5 +449,3 @@ export const AcousticHeatmap: React.FC<AcousticHeatmapProps> = ({ deviceId, late
     </div>
   );
 };
-
-export default AcousticHeatmap;

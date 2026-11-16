@@ -8,7 +8,7 @@ import {
   ZonesConfigSsePayload,
   DeviceConfigSsePayload,
 } from '../types/api_types.js';
-import { extractApiErrorMessage, formatClientError } from '../services/error_messages.js';
+import { apiRequestJson } from '../services/api_client.js';
 
 interface UseSSEStreamOptions {
   deviceId: number;
@@ -38,24 +38,18 @@ export function useSSEStream({ deviceId, maxBufferLength = 500 }: UseSSEStreamOp
   // Fetch initial global all-time count from database
   useEffect(() => {
     let cancelled = false;
-    fetch(`/api/v1/devices/${deviceId}/count`, { credentials: 'include' })
-      .then(async (res) => {
-        if (!res.ok) {
-          const msg = await extractApiErrorMessage(res, 'Failed to load total event count.');
-          if (!cancelled) setStreamError(msg);
-          return null;
-        }
-        return res.json();
-      })
+    apiRequestJson<{ total?: number }>(`/api/v1/devices/${deviceId}/count`, {
+      fallbackError: 'Unable to load total telemetry count.',
+    })
       .then((data) => {
-        if (!cancelled && data && typeof data.total === 'number') {
+        if (!cancelled && typeof data?.total === 'number') {
           setGlobalEventCount(data.total);
         }
       })
       .catch((err) => {
         console.warn('[SSE] Failed to load global count:', err);
         if (!cancelled) {
-          setStreamError(formatClientError(err, 'Unable to load total telemetry count.'));
+          setStreamError(err instanceof Error ? err.message : 'Unable to load total telemetry count.');
         }
       });
 
@@ -126,35 +120,22 @@ export function useSSEStream({ deviceId, maxBufferLength = 500 }: UseSSEStreamOp
       }
     });
 
-    es.addEventListener('studio_config', (event) => {
-      try {
-        const studio: StudioConfigPayload = JSON.parse(event.data);
-        setLatestStudioConfig(studio);
-      } catch (err) {
-        console.error('[SSE] Failed to parse studio_config event:', err);
-        setStreamError('Received malformed studio update from the live stream.');
-      }
-    });
+    const configEventSubscriptions: Array<[string, (payload: any) => void, string]> = [
+      ['studio_config', setLatestStudioConfig, 'studio update'],
+      ['zones_config', setLatestZonesConfig, 'spatial zone update'],
+      ['device_config', setLatestDeviceConfig, 'device configuration update'],
+    ];
 
-    es.addEventListener('zones_config', (event) => {
-      try {
-        const payload: ZonesConfigSsePayload = JSON.parse(event.data);
-        setLatestZonesConfig(payload);
-      } catch (err) {
-        console.error('[SSE] Failed to parse zones_config event:', err);
-        setStreamError('Received malformed spatial zone update from the live stream.');
-      }
-    });
-
-    es.addEventListener('device_config', (event) => {
-      try {
-        const payload: DeviceConfigSsePayload = JSON.parse(event.data);
-        setLatestDeviceConfig(payload);
-      } catch (err) {
-        console.error('[SSE] Failed to parse device_config event:', err);
-        setStreamError('Received malformed device configuration update from the live stream.');
-      }
-    });
+    for (const [eventName, applyPayload, label] of configEventSubscriptions) {
+      es.addEventListener(eventName, (event) => {
+        try {
+          applyPayload(JSON.parse(event.data));
+        } catch (err) {
+          console.error(`[SSE] Failed to parse ${eventName} event:`, err);
+          setStreamError(`Received malformed ${label} from the live stream.`);
+        }
+      });
+    }
 
     es.addEventListener('heartbeat', () => {
       setConnected(true);

@@ -1,10 +1,9 @@
 import { useState, useEffect, useCallback } from 'react';
 import { DeviceCalibration, DeviceConfigSsePayload } from '../types/api_types.js';
-import { extractApiErrorMessage, formatClientError } from '../services/error_messages.js';
+import { ApiError, apiRequestJson } from '../services/api_client.js';
 
 export function useDeviceConfig(
   deviceId: number,
-  token?: string | null,
   latestDeviceConfig?: DeviceConfigSsePayload | null
 ) {
   const [config, setConfig] = useState<DeviceCalibration | null>(null);
@@ -18,26 +17,16 @@ export function useDeviceConfig(
     setLoading(true);
     setError(null);
     try {
-      const headers: Record<string, string> = {};
-      if (token) {
-        headers['Authorization'] = `Bearer ${token}`;
-      }
-      const res = await fetch(`/api/v1/devices/${deviceId}/config`, {
-        credentials: 'include',
-        headers,
+      const data = await apiRequestJson<DeviceCalibration>(`/api/v1/devices/${deviceId}/config`, {
+        fallbackError: 'Failed to load device configuration.',
       });
-      if (!res.ok) {
-        const message = await extractApiErrorMessage(res, 'Failed to load device configuration.');
-        throw new Error(message);
-      }
-      const data = await res.json();
       setConfig(data);
     } catch (err) {
-      setError(formatClientError(err, 'Failed to load device configuration.'));
+      setError(err instanceof Error ? err.message : 'Failed to load device configuration.');
     } finally {
       setLoading(false);
     }
-  }, [deviceId, token]);
+  }, [deviceId]);
 
   useEffect(() => {
     fetchConfig();
@@ -54,33 +43,21 @@ export function useDeviceConfig(
     setError(null);
     setSuccessMsg(null);
     try {
-      const headers: Record<string, string> = { 'Content-Type': 'application/json' };
-      if (token) {
-        headers['Authorization'] = `Bearer ${token}`;
-      }
-
-      const res = await fetch(`/api/v1/devices/${deviceId}/config`, {
+      const updated = await apiRequestJson<DeviceCalibration>(`/api/v1/devices/${deviceId}/config`, {
         method: 'PUT',
-        credentials: 'include',
-        headers,
         body: JSON.stringify(partial),
+        fallbackError: 'Failed to update device configuration.',
       });
-
-      if (!res.ok) {
-        if (res.status === 401 || res.status === 403) {
-          throw new Error('Administrator privileges required to update calibration.');
-        }
-        const message = await extractApiErrorMessage(res, 'Failed to update device configuration.');
-        throw new Error(message);
-      }
-
-      const updated = await res.json();
       setConfig(updated);
       setSuccessMsg('Configuration saved! ESP32 will synchronize on next poll (<=60s).');
       setTimeout(() => setSuccessMsg(null), 5000);
       return true;
     } catch (err) {
-      setError(formatClientError(err, 'Failed to update device configuration.'));
+      if (err instanceof ApiError && (err.status === 401 || err.status === 403)) {
+        setError('Administrator privileges required to update calibration.');
+      } else {
+        setError(err instanceof Error ? err.message : 'Failed to update device configuration.');
+      }
       return false;
     } finally {
       setLoading(false);
@@ -91,33 +68,24 @@ export function useDeviceConfig(
     setLoading(true);
     setError(null);
     try {
-      const headers: Record<string, string> = { 'Content-Type': 'application/json' };
-      if (token) {
-        headers['Authorization'] = `Bearer ${token}`;
-      }
-
-      const res = await fetch(`/api/v1/devices/${deviceId}/calibrate/zero-angle`, {
-        method: 'POST',
-        credentials: 'include',
-        headers,
-        body: JSON.stringify({ sample_count: sampleCount }),
-      });
-
-      if (!res.ok) {
-        if (res.status === 401 || res.status === 403) {
-          throw new Error('Administrator privileges required to trigger zero-angle trim.');
+      const result = await apiRequestJson<{ newOffset: number; samplesUsed: number }>(
+        `/api/v1/devices/${deviceId}/calibrate/zero-angle`,
+        {
+          method: 'POST',
+          body: JSON.stringify({ sample_count: sampleCount }),
+          fallbackError: 'Zero-angle calibration failed.',
         }
-        const message = await extractApiErrorMessage(res, 'Zero-angle calibration failed.');
-        throw new Error(message);
-      }
-
-      const result = await res.json();
-      await fetchConfig(); // Refresh
+      );
+      await fetchConfig();
       setSuccessMsg(`Zero-angle calibrated: offset adjusted to ${result.newOffset}° (${result.samplesUsed} samples)`);
       setTimeout(() => setSuccessMsg(null), 5000);
       return result;
     } catch (err) {
-      setError(formatClientError(err, 'Zero-angle calibration failed.'));
+      if (err instanceof ApiError && (err.status === 401 || err.status === 403)) {
+        setError('Administrator privileges required to trigger zero-angle trim.');
+      } else {
+        setError(err instanceof Error ? err.message : 'Zero-angle calibration failed.');
+      }
       return null;
     } finally {
       setLoading(false);
@@ -135,5 +103,3 @@ export function useDeviceConfig(
     calibrateZeroAngle,
   };
 }
-
-export default useDeviceConfig;

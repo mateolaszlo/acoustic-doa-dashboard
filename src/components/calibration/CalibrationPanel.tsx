@@ -639,5 +639,3 @@ export const CalibrationPanel: React.FC<CalibrationPanelProps> = ({
     </div>
   );
 };
-
-export default CalibrationPanel;

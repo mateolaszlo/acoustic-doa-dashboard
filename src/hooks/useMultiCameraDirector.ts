@@ -16,7 +16,7 @@ import {
   scoreCameraCandidate,
   stepCameraPan,
 } from '../services/camera_ptz_math';
-import { extractApiErrorMessage, formatClientError } from '../services/error_messages.js';
+import { apiRequestJson } from '../services/api_client.js';
 
 export interface ActiveSpeakerTarget {
   slotId: number;
@@ -29,10 +29,15 @@ export interface ActiveSpeakerTarget {
 
 export interface UseMultiCameraDirectorOptions {
   deviceId?: number;
-  token?: string | null;
   isAdmin?: boolean;
   latestDirectorState?: DirectorTelemetryState | null;
   latestStudioConfig?: StudioConfigPayload | null;
+}
+
+function saveStudioCache(key: string, value: unknown): void {
+  try {
+    localStorage.setItem(key, JSON.stringify(value));
+  } catch {}
 }
 
 export function mergeDirectorAnimationFrame(
@@ -79,7 +84,6 @@ export function mergeDirectorAnimationFrame(
 
 export function useMultiCameraDirector({
   deviceId = 1,
-  token = null,
   isAdmin = false,
   latestDirectorState = null,
   latestStudioConfig = null,
@@ -110,14 +114,11 @@ export function useMultiCameraDirector({
   });
 
   const [liveCamId, setLiveCamId] = useState<string>('cam-front');
-  const [activeZoneName, setActiveZoneName] = useState<string>('None');
-  const [isLoadingStudio, setIsLoadingStudio] = useState<boolean>(false);
   const [studioError, setStudioError] = useState<string | null>(null);
 
   const clearStudioError = useCallback(() => setStudioError(null), []);
 
   // Runtime tracking refs
-  const lastSwitchTimeRef = useRef<number>(Date.now());
   const lastRoomAudioTimeRef = useRef<number>(Date.now());
 
   const roomLayoutRef = useRef(roomLayout);
@@ -142,34 +143,17 @@ export function useMultiCameraDirector({
   // 2. Fetch authoritative studio layout & cameras from backend on mount / deviceId change
   useEffect(() => {
     let isCancelled = false;
-    setIsLoadingStudio(true);
 
-    const headers: Record<string, string> = {};
-    if (token) {
-      headers['Authorization'] = `Bearer ${token}`;
-    }
-
-    fetch(`/api/v1/devices/${deviceId}/studio`, {
-      credentials: 'include',
-      headers,
+    apiRequestJson<StudioConfigPayload>(`/api/v1/devices/${deviceId}/studio`, {
+      fallbackError: 'Failed to load studio configuration.',
     })
-      .then(async (res) => {
-        if (!res.ok) {
-          const msg = await extractApiErrorMessage(res, 'Failed to load studio configuration.');
-          if (!isCancelled) setStudioError(msg);
-          return null;
-        }
-        return res.json();
-      })
-      .then((data: StudioConfigPayload | null) => {
+      .then((data) => {
         if (isCancelled || !data) return;
         setStudioError(null);
 
         if (data.roomLayout) {
           setRoomLayout(data.roomLayout);
-          try {
-            localStorage.setItem('acoustic_room_layout_config', JSON.stringify(data.roomLayout));
-          } catch {}
+          saveStudioCache('acoustic_room_layout_config', data.roomLayout);
         }
 
         if (data.cameras && Array.isArray(data.cameras)) {
@@ -183,31 +167,23 @@ export function useMultiCameraDirector({
               };
             })
           );
-          try {
-            localStorage.setItem('acoustic_cameras_config', JSON.stringify(data.cameras));
-          } catch {}
+          saveStudioCache('acoustic_cameras_config', data.cameras);
         }
 
         if (data.directorConfig) {
           setDirectorConfig(data.directorConfig);
-          try {
-            localStorage.setItem('acoustic_director_config', JSON.stringify(data.directorConfig));
-          } catch {}
+          saveStudioCache('acoustic_director_config', data.directorConfig);
         }
 
         if (data.liveCamId) {
           setLiveCamId(data.liveCamId);
         }
-
-        if (data.activeZoneName) {
-          setActiveZoneName(data.activeZoneName);
-        }
       })
       .catch((err) => {
         console.warn('[Director] Failed to fetch studio config from backend, using local defaults:', err);
-      })
-      .finally(() => {
-        if (!isCancelled) setIsLoadingStudio(false);
+        if (!isCancelled) {
+          setStudioError(err instanceof Error ? err.message : 'Failed to load studio configuration.');
+        }
       });
 
     return () => {
@@ -243,9 +219,6 @@ export function useMultiCameraDirector({
     if (latestStudioConfig.liveCamId) {
       setLiveCamId(latestStudioConfig.liveCamId);
     }
-    if (latestStudioConfig.activeZoneName) {
-      setActiveZoneName(latestStudioConfig.activeZoneName);
-    }
   }, [latestStudioConfig]);
 
   // 4. React to real-time authoritative PTZ director telemetry from measurement stream
@@ -254,10 +227,6 @@ export function useMultiCameraDirector({
 
     if (latestDirectorState.liveCamId && latestDirectorState.liveCamId !== liveCamIdRef.current) {
       setLiveCamId(latestDirectorState.liveCamId);
-    }
-
-    if (latestDirectorState.activeZoneName) {
-      setActiveZoneName(latestDirectorState.activeZoneName);
     }
 
     if (Array.isArray(latestDirectorState.cameras)) {
@@ -300,25 +269,17 @@ export function useMultiCameraDirector({
 
       const executeSave = async () => {
         try {
-          const headers: Record<string, string> = { 'Content-Type': 'application/json' };
-          if (token) {
-            headers['Authorization'] = `Bearer ${token}`;
-          }
-          const res = await fetch(`/api/v1/devices/${deviceId}/studio`, {
+          await apiRequestJson(`/api/v1/devices/${deviceId}/studio`, {
             method: 'PUT',
-            credentials: 'include',
-            headers,
             body: JSON.stringify(payload),
+            fallbackError: 'Failed to save studio changes.',
           });
-          if (!res.ok) {
-            const msg = await extractApiErrorMessage(res, 'Failed to save studio changes.');
-            setStudioError(msg);
-            return;
-          }
           setStudioError(null);
         } catch (err) {
           console.warn('[Director] Failed to sync studio configuration with backend:', err);
-          setStudioError(formatClientError(err, 'Failed to save studio changes to the server.'));
+          setStudioError(
+            err instanceof Error ? err.message : 'Failed to save studio changes to the server.'
+          );
         }
       };
 
@@ -328,7 +289,7 @@ export function useMultiCameraDirector({
         saveTimeoutRef.current = setTimeout(executeSave, 250);
       }
     },
-    [deviceId, isAdmin, token]
+    [deviceId, isAdmin]
   );
 
   /**
@@ -341,7 +302,7 @@ export function useMultiCameraDirector({
       roomWidth: number = BASE_ROOM_WIDTH,
       roomHeight: number = BASE_ROOM_HEIGHT,
       dtSec: number = 0.016
-    ): { activeCamera: VirtualCamera | null; switched: boolean } => {
+    ): { activeCamera: VirtualCamera | null } => {
       const now = Date.now();
       const config = directorConfigRef.current;
       let currentCameras = [...camerasRef.current];
@@ -459,7 +420,6 @@ export function useMultiCameraDirector({
 
       return {
         activeCamera: updatedCameras.find((c) => c.id === currentLiveId) || null,
-        switched: false,
       };
     },
     [latestDirectorState]
@@ -474,9 +434,7 @@ export function useMultiCameraDirector({
           delete next.customChairs;
         }
         roomLayoutRef.current = next;
-        try {
-          localStorage.setItem('acoustic_room_layout_config', JSON.stringify(next));
-        } catch {}
+        saveStudioCache('acoustic_room_layout_config', next);
         scheduleBackendSync(
           {
             roomLayout: {
@@ -518,10 +476,7 @@ export function useMultiCameraDirector({
           isLive: c.id === nextLiveId,
         }));
         camerasRef.current = updatedWithLive;
-
-        try {
-          localStorage.setItem('acoustic_cameras_config', JSON.stringify(updatedWithLive));
-        } catch {}
+        saveStudioCache('acoustic_cameras_config', updatedWithLive);
 
         scheduleBackendSync({ cameras: updatedWithLive, liveCamId: nextLiveId }, true);
         return updatedWithLive;
@@ -535,9 +490,7 @@ export function useMultiCameraDirector({
       setCameras((prev) => {
         const next = prev.map((c) => (c.id === id ? { ...c, ...partial } : c));
         camerasRef.current = next;
-        try {
-          localStorage.setItem('acoustic_cameras_config', JSON.stringify(next));
-        } catch {}
+        saveStudioCache('acoustic_cameras_config', next);
         scheduleBackendSync({ cameras: next }, false);
         return next;
       });
@@ -549,9 +502,7 @@ export function useMultiCameraDirector({
     (partial: Partial<CameraDirectorConfig>) => {
       setDirectorConfig((prev) => {
         const next = { ...prev, ...partial };
-        try {
-          localStorage.setItem('acoustic_director_config', JSON.stringify(next));
-        } catch {}
+        saveStudioCache('acoustic_director_config', next);
         scheduleBackendSync({ directorConfig: next }, true);
         return next;
       });
@@ -562,7 +513,6 @@ export function useMultiCameraDirector({
   const setManualLiveCamera = useCallback(
     (id: string) => {
       setLiveCamId(id);
-      lastSwitchTimeRef.current = Date.now();
       setCameras((prev) =>
         prev.map((c) => ({
           ...c,
@@ -579,13 +529,10 @@ export function useMultiCameraDirector({
     setCameras(DEFAULT_VIRTUAL_CAMERAS);
     setDirectorConfig(DEFAULT_DIRECTOR_CONFIG);
     setLiveCamId('cam-front');
-    lastSwitchTimeRef.current = Date.now();
 
-    try {
-      localStorage.setItem('acoustic_room_layout_config', JSON.stringify(DEFAULT_ROOM_LAYOUT));
-      localStorage.setItem('acoustic_cameras_config', JSON.stringify(DEFAULT_VIRTUAL_CAMERAS));
-      localStorage.setItem('acoustic_director_config', JSON.stringify(DEFAULT_DIRECTOR_CONFIG));
-    } catch {}
+    saveStudioCache('acoustic_room_layout_config', DEFAULT_ROOM_LAYOUT);
+    saveStudioCache('acoustic_cameras_config', DEFAULT_VIRTUAL_CAMERAS);
+    saveStudioCache('acoustic_director_config', DEFAULT_DIRECTOR_CONFIG);
 
     scheduleBackendSync({ reset: true }, true);
   }, [scheduleBackendSync]);
@@ -595,8 +542,6 @@ export function useMultiCameraDirector({
     cameras,
     liveCamId,
     directorConfig,
-    activeZoneName,
-    isLoadingStudio,
     studioError,
     clearStudioError,
     processDirectorFrame,
@@ -609,5 +554,3 @@ export function useMultiCameraDirector({
     setDraggingStudio,
   };
 }
-
-export default useMultiCameraDirector;

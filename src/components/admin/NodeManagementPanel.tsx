@@ -1,7 +1,7 @@
 import React, { useState, useEffect, useCallback } from 'react';
 import { useAuth } from '../../context/AuthContext.js';
 import { DeviceAdminDetails } from '../../types/api_types.js';
-import { extractApiErrorMessage, formatClientError } from '../../services/error_messages.js';
+import { apiRequestJson } from '../../services/api_client.js';
 import {
   Cpu,
   Key,
@@ -27,11 +27,16 @@ interface NodeManagementPanelProps {
   onSelectDevice?: (deviceId: number) => void;
 }
 
+type PendingNodeAction =
+  | { type: 'purge'; node: DeviceAdminDetails }
+  | { type: 'rotate'; node: DeviceAdminDetails }
+  | { type: 'delete'; node: DeviceAdminDetails };
+
 export const NodeManagementPanel: React.FC<NodeManagementPanelProps> = ({
   currentDeviceId,
   onSelectDevice,
 }) => {
-  const { token, isAdmin } = useAuth();
+  const { isAdmin } = useAuth();
   const [nodes, setNodes] = useState<DeviceAdminDetails[]>([]);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -56,15 +61,9 @@ export const NodeManagementPanel: React.FC<NodeManagementPanelProps> = ({
     apiKey: string;
   } | null>(null);
 
-  // Action Confirmation Modals
-  const [purgeTarget, setPurgeTarget] = useState<DeviceAdminDetails | null>(null);
-  const [isPurging, setIsPurging] = useState(false);
-
-  const [deleteTarget, setDeleteTarget] = useState<DeviceAdminDetails | null>(null);
-  const [isDeleting, setIsDeleting] = useState(false);
-
-  const [rotateTarget, setRotateTarget] = useState<DeviceAdminDetails | null>(null);
-  const [isRotating, setIsRotating] = useState(false);
+  // Unified Action Confirmation Modal state
+  const [pendingAction, setPendingAction] = useState<PendingNodeAction | null>(null);
+  const [isConfirmingAction, setIsConfirmingAction] = useState(false);
 
   const fetchNodes = useCallback(async () => {
     if (!isAdmin) return;
@@ -72,26 +71,16 @@ export const NodeManagementPanel: React.FC<NodeManagementPanelProps> = ({
     setError(null);
 
     try {
-      const headers: Record<string, string> = {};
-      if (token) headers['Authorization'] = `Bearer ${token}`;
-      const res = await fetch('/api/v1/devices', {
-        credentials: 'include',
-        headers,
+      const data = await apiRequestJson<DeviceAdminDetails[]>('/api/v1/devices', {
+        fallbackError: 'Failed to load hardware nodes.',
       });
-
-      if (!res.ok) {
-        const message = await extractApiErrorMessage(res, 'Failed to load hardware nodes.');
-        throw new Error(message);
-      }
-
-      const data = await res.json();
       setNodes(Array.isArray(data) ? data : []);
     } catch (err) {
-      setError(formatClientError(err, 'Unable to load hardware nodes.'));
+      setError(err instanceof Error ? err.message : 'Unable to load hardware nodes.');
     } finally {
       setLoading(false);
     }
-  }, [isAdmin, token]);
+  }, [isAdmin]);
 
   useEffect(() => {
     fetchNodes();
@@ -126,26 +115,16 @@ export const NodeManagementPanel: React.FC<NodeManagementPanelProps> = ({
     setError(null);
 
     try {
-      const headers: Record<string, string> = { 'Content-Type': 'application/json' };
-      if (token) headers['Authorization'] = `Bearer ${token}`;
-      const res = await fetch(`/api/v1/devices/${nodeId}`, {
+      const data = await apiRequestJson<{ name: string }>(`/api/v1/devices/${nodeId}`, {
         method: 'PUT',
-        credentials: 'include',
-        headers,
         body: JSON.stringify({ name: editingName.trim() }),
+        fallbackError: 'Failed to rename node.',
       });
-
-      if (!res.ok) {
-        const message = await extractApiErrorMessage(res, 'Failed to rename node.');
-        throw new Error(message);
-      }
-
-      const data = await res.json();
       showSuccess(`Node #${nodeId} renamed to "${data.name}"`);
       setEditingNodeId(null);
       fetchNodes();
     } catch (err) {
-      setError(formatClientError(err, 'Failed to rename hardware node.'));
+      setError(err instanceof Error ? err.message : 'Failed to rename hardware node.');
     }
   };
 
@@ -161,21 +140,11 @@ export const NodeManagementPanel: React.FC<NodeManagementPanelProps> = ({
         payload.apiKey = newCustomApiKey.trim();
       }
 
-      const headers: Record<string, string> = { 'Content-Type': 'application/json' };
-      if (token) headers['Authorization'] = `Bearer ${token}`;
-      const res = await fetch('/api/v1/devices', {
+      const data = await apiRequestJson<{ id: number; name: string; apiKey: string }>('/api/v1/devices', {
         method: 'POST',
-        credentials: 'include',
-        headers,
         body: JSON.stringify(payload),
+        fallbackError: 'Failed to register hardware node.',
       });
-
-      if (!res.ok) {
-        const message = await extractApiErrorMessage(res, 'Failed to register hardware node.');
-        throw new Error(message);
-      }
-
-      const data = await res.json();
       setRegisteredSuccessInfo({
         id: data.id,
         name: data.name,
@@ -185,101 +154,46 @@ export const NodeManagementPanel: React.FC<NodeManagementPanelProps> = ({
       setNewCustomApiKey('');
       fetchNodes();
     } catch (err) {
-      setError(formatClientError(err, 'Failed to register hardware node.'));
+      setError(err instanceof Error ? err.message : 'Failed to register hardware node.');
     } finally {
       setIsSubmittingNew(false);
     }
   };
 
-  const handleConfirmRotate = async () => {
-    if (!rotateTarget) return;
-    setIsRotating(true);
+  const handleConfirmPendingAction = async () => {
+    if (!pendingAction) return;
+    const { type, node } = pendingAction;
+    setIsConfirmingAction(true);
     setError(null);
 
     try {
-      const headers: Record<string, string> = {};
-      if (token) headers['Authorization'] = `Bearer ${token}`;
-      const res = await fetch(`/api/v1/devices/${rotateTarget.id}/api-key/rotate`, {
-        method: 'POST',
-        credentials: 'include',
-        headers,
-      });
-
-      if (!res.ok) {
-        const message = await extractApiErrorMessage(res, 'Failed to rotate API key.');
-        throw new Error(message);
+      if (type === 'rotate') {
+        await apiRequestJson(`/api/v1/devices/${node.id}/api-key/rotate`, {
+          method: 'POST',
+          fallbackError: 'Failed to rotate API key.',
+        });
+        showSuccess(`API Key for Node #${node.id} successfully rotated`);
+        setRevealedKeys((prev) => ({ ...prev, [node.id]: true }));
+      } else if (type === 'purge') {
+        const data = await apiRequestJson<{ deleted_records: number }>(`/api/v1/devices/${node.id}/measurements`, {
+          method: 'DELETE',
+          fallbackError: 'Failed to purge measurements.',
+        });
+        showSuccess(`Purged ${data.deleted_records} measurements for Node #${node.id}`);
+      } else {
+        await apiRequestJson(`/api/v1/devices/${node.id}`, {
+          method: 'DELETE',
+          fallbackError: 'Failed to decommission node.',
+        });
+        showSuccess(`Node #${node.id} decommissioned and deleted`);
       }
 
-      await res.json().catch(() => null);
-      showSuccess(`API Key for Node #${rotateTarget.id} successfully rotated`);
-      setRotateTarget(null);
-      // Auto reveal new key
-      setRevealedKeys((prev) => ({ ...prev, [rotateTarget.id]: true }));
+      setPendingAction(null);
       fetchNodes();
     } catch (err) {
-      setError(formatClientError(err, 'Failed to rotate API key.'));
+      setError(err instanceof Error ? err.message : 'Operation failed.');
     } finally {
-      setIsRotating(false);
-    }
-  };
-
-  const handleConfirmPurge = async () => {
-    if (!purgeTarget) return;
-    setIsPurging(true);
-    setError(null);
-
-    try {
-      const headers: Record<string, string> = {};
-      if (token) headers['Authorization'] = `Bearer ${token}`;
-      const res = await fetch(`/api/v1/devices/${purgeTarget.id}/measurements`, {
-        method: 'DELETE',
-        credentials: 'include',
-        headers,
-      });
-
-      if (!res.ok) {
-        const message = await extractApiErrorMessage(res, 'Failed to purge measurements.');
-        throw new Error(message);
-      }
-
-      const data = await res.json();
-      showSuccess(`Purged ${data.deleted_records} measurements for Node #${purgeTarget.id}`);
-      setPurgeTarget(null);
-      fetchNodes();
-    } catch (err) {
-      setError(formatClientError(err, 'Failed to purge measurements.'));
-    } finally {
-      setIsPurging(false);
-    }
-  };
-
-  const handleConfirmDelete = async () => {
-    if (!deleteTarget) return;
-    setIsDeleting(true);
-    setError(null);
-
-    try {
-      const headers: Record<string, string> = {};
-      if (token) headers['Authorization'] = `Bearer ${token}`;
-      const res = await fetch(`/api/v1/devices/${deleteTarget.id}`, {
-        method: 'DELETE',
-        credentials: 'include',
-        headers,
-      });
-
-      if (!res.ok) {
-        const message = await extractApiErrorMessage(res, 'Failed to decommission node.');
-        throw new Error(message);
-      }
-
-      await res.json().catch(() => null);
-      showSuccess(`Node #${deleteTarget.id} decommissioned and deleted`);
-      setDeleteTarget(null);
-      fetchNodes();
-    } catch (err) {
-      setError(formatClientError(err, 'Failed to decommission node.'));
-    } finally {
-      setIsDeleting(false);
+      setIsConfirmingAction(false);
     }
   };
 
@@ -473,7 +387,7 @@ export const NodeManagementPanel: React.FC<NodeManagementPanelProps> = ({
                     <Key className="w-3.5 h-3.5 text-amber-400" /> Ingestion API Key
                   </span>
                   <button
-                    onClick={() => setRotateTarget(node)}
+                    onClick={() => setPendingAction({ type: 'rotate', node })}
                     className="text-[11px] text-amber-400 hover:text-amber-300 underline underline-offset-2 flex items-center gap-1 transition"
                   >
                     Rotate Key
@@ -523,7 +437,7 @@ export const NodeManagementPanel: React.FC<NodeManagementPanelProps> = ({
 
                 <div className="flex items-center gap-2">
                   <button
-                    onClick={() => setPurgeTarget(node)}
+                    onClick={() => setPendingAction({ type: 'purge', node })}
                     className="flex items-center gap-1 px-2.5 py-1 text-xs text-rose-400 hover:text-rose-300 bg-rose-950/40 hover:bg-rose-950/80 border border-rose-900/60 rounded-lg font-medium transition"
                     title="Purge historical telemetry measurements for this node"
                   >
@@ -532,7 +446,7 @@ export const NodeManagementPanel: React.FC<NodeManagementPanelProps> = ({
                   </button>
 
                   <button
-                    onClick={() => setDeleteTarget(node)}
+                    onClick={() => setPendingAction({ type: 'delete', node })}
                     className="p-1.5 text-slate-500 hover:text-rose-400 hover:bg-slate-800 rounded transition"
                     title="Decommission & delete node"
                   >
@@ -554,7 +468,7 @@ export const NodeManagementPanel: React.FC<NodeManagementPanelProps> = ({
 
       {/* ================= REGISTER MODAL ================= */}
       {isRegisterOpen && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-950/80 backdrop-blur-sm animate-fade-in">
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-950/80 backdrop-blur-sm">
           <div className="bg-slate-900 border border-slate-800 rounded-2xl max-w-md w-full p-6 shadow-2xl space-y-4">
             <div className="flex items-center justify-between border-b border-slate-800 pb-3">
               <div className="flex items-center gap-2">
@@ -667,182 +581,111 @@ export const NodeManagementPanel: React.FC<NodeManagementPanelProps> = ({
         </div>
       )}
 
-      {/* ================= PURGE CONFIRMATION MODAL ================= */}
-      {purgeTarget && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-950/80 backdrop-blur-sm animate-fade-in">
-          <div className="bg-slate-900 border border-rose-900/60 rounded-2xl max-w-md w-full p-6 shadow-2xl space-y-4">
-            <div className="flex items-start gap-3">
-              <div className="p-3 bg-rose-950 text-rose-400 rounded-xl border border-rose-800 shrink-0">
-                <AlertTriangle className="w-6 h-6" />
-              </div>
-              <div>
-                <h3 className="text-base font-bold text-white">Purge Historical Data?</h3>
-                <p className="text-xs text-slate-400 mt-1">
-                  You are about to permanently delete all stored telemetry measurements for{' '}
-                  <strong className="text-slate-200">
-                    Node #{purgeTarget.id} ({purgeTarget.name})
-                  </strong>
-                  .
-                </p>
-              </div>
-            </div>
+      {/* ================= UNIFIED ACTION CONFIRMATION MODAL ================= */}
+      {pendingAction && (() => {
+        const { type, node } = pendingAction;
+        const isAmber = type === 'rotate';
+        const borderClass = isAmber ? 'border-amber-900/60' : 'border-rose-900/60';
+        const iconBoxClass = isAmber
+          ? 'bg-amber-950 text-amber-400 border-amber-800'
+          : 'bg-rose-950 text-rose-400 border-rose-800';
+        const warningBoxClass = isAmber
+          ? 'bg-amber-950/30 border-amber-900/40 text-amber-300'
+          : 'bg-rose-950/30 border-rose-900/40 text-rose-300';
+        const confirmBtnClass = isAmber
+          ? 'bg-amber-600 hover:bg-amber-500'
+          : 'bg-rose-600 hover:bg-rose-500';
 
-            <div className="p-3 bg-rose-950/30 border border-rose-900/40 rounded-xl text-xs text-rose-300 space-y-1">
-              <p className="font-semibold">⚠️ Caution: Irreversible Database Purge</p>
-              <p className="text-slate-400">
-                Currently holding{' '}
-                <strong className="text-white">
-                  {(purgeTarget.total_events || 0).toLocaleString()} records
-                </strong>
-                . This will immediately reset the acoustic heatmap and historical stats for this node. Active hardware telemetry stream will remain uninterrupted.
-              </p>
-            </div>
+        const modalConfig =
+          type === 'purge'
+            ? {
+                icon: <AlertTriangle className="w-6 h-6" />,
+                btnIcon: <Trash2 className="w-3.5 h-3.5" />,
+                title: 'Purge Historical Data?',
+                lead: 'permanently delete all stored telemetry measurements for',
+                warningTitle: 'Caution: Irreversible Database Purge',
+                warningBody: `Currently holding ${(node.total_events || 0).toLocaleString()} records. This will immediately reset the acoustic heatmap and historical stats for this node. Active hardware telemetry stream will remain uninterrupted.`,
+                busyLabel: 'Purging...',
+                confirmLabel: 'Confirm Purge Measurements',
+              }
+            : type === 'rotate'
+            ? {
+                icon: <Key className="w-6 h-6" />,
+                btnIcon: <Key className="w-3.5 h-3.5" />,
+                title: 'Rotate Ingestion API Key?',
+                lead: 'rotate the API key for',
+                warningTitle: 'Requires Hardware Firmware Update',
+                warningBody:
+                  'Any ESP32 sending binary measurement batches with the old key will be rejected with HTTP 401 until re-flashed or configured with the newly generated key.',
+                busyLabel: 'Rotating Key...',
+                confirmLabel: 'Confirm Key Rotation',
+              }
+            : {
+                icon: <Trash2 className="w-6 h-6" />,
+                btnIcon: <Trash2 className="w-3.5 h-3.5" />,
+                title: 'Decommission Hardware Node?',
+                lead: 'decommission and delete',
+                warningTitle: 'Full Node Removal',
+                warningBody:
+                  'This will delete the node entry, its calibration settings, and all associated telemetry records permanently.',
+                busyLabel: 'Deleting...',
+                confirmLabel: 'Decommission Node',
+              };
 
-            <div className="flex justify-end gap-2 border-t border-slate-800 pt-3">
-              <button
-                onClick={() => setPurgeTarget(null)}
-                disabled={isPurging}
-                className="px-3 py-2 bg-slate-800 hover:bg-slate-700 text-slate-300 rounded-lg text-xs font-semibold transition"
-              >
-                Cancel
-              </button>
-              <button
-                onClick={handleConfirmPurge}
-                disabled={isPurging}
-                className="flex items-center gap-1.5 px-4 py-2 bg-rose-600 hover:bg-rose-500 text-white rounded-lg text-xs font-bold transition disabled:opacity-50"
-              >
-                {isPurging ? (
-                  <>
-                    <RefreshCw className="w-3.5 h-3.5 animate-spin" />
-                    <span>Purging...</span>
-                  </>
-                ) : (
-                  <>
-                    <Trash2 className="w-3.5 h-3.5" />
-                    <span>Confirm Purge Measurements</span>
-                  </>
-                )}
-              </button>
+        return (
+          <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-950/80 backdrop-blur-sm">
+            <div className={`bg-slate-900 ${borderClass} border rounded-2xl max-w-md w-full p-6 shadow-2xl space-y-4`}>
+              <div className="flex items-start gap-3">
+                <div className={`p-3 ${iconBoxClass} rounded-xl border shrink-0`}>
+                  {modalConfig.icon}
+                </div>
+                <div>
+                  <h3 className="text-base font-bold text-white">{modalConfig.title}</h3>
+                  <p className="text-xs text-slate-400 mt-1">
+                    You are about to {modalConfig.lead}{' '}
+                    <strong className="text-slate-200">
+                      Node #{node.id} ({node.name})
+                    </strong>
+                    .
+                  </p>
+                </div>
+              </div>
+
+              <div className={`p-3 ${warningBoxClass} border rounded-xl text-xs space-y-1`}>
+                <p className="font-semibold">⚠️ {modalConfig.warningTitle}</p>
+                <p className="text-slate-400">{modalConfig.warningBody}</p>
+              </div>
+
+              <div className="flex justify-end gap-2 border-t border-slate-800 pt-3">
+                <button
+                  onClick={() => setPendingAction(null)}
+                  disabled={isConfirmingAction}
+                  className="px-3 py-2 bg-slate-800 hover:bg-slate-700 text-slate-300 rounded-lg text-xs font-semibold transition"
+                >
+                  Cancel
+                </button>
+                <button
+                  onClick={handleConfirmPendingAction}
+                  disabled={isConfirmingAction}
+                  className={`flex items-center gap-1.5 px-4 py-2 ${confirmBtnClass} text-white rounded-lg text-xs font-bold transition disabled:opacity-50`}
+                >
+                  {isConfirmingAction ? (
+                    <>
+                      <RefreshCw className="w-3.5 h-3.5 animate-spin" />
+                      <span>{modalConfig.busyLabel}</span>
+                    </>
+                  ) : (
+                    <>
+                      {modalConfig.btnIcon}
+                      <span>{modalConfig.confirmLabel}</span>
+                    </>
+                  )}
+                </button>
+              </div>
             </div>
           </div>
-        </div>
-      )}
-
-      {/* ================= ROTATE API KEY CONFIRMATION MODAL ================= */}
-      {rotateTarget && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-950/80 backdrop-blur-sm animate-fade-in">
-          <div className="bg-slate-900 border border-amber-900/60 rounded-2xl max-w-md w-full p-6 shadow-2xl space-y-4">
-            <div className="flex items-start gap-3">
-              <div className="p-3 bg-amber-950 text-amber-400 rounded-xl border border-amber-800 shrink-0">
-                <Key className="w-6 h-6" />
-              </div>
-              <div>
-                <h3 className="text-base font-bold text-white">Rotate Ingestion API Key?</h3>
-                <p className="text-xs text-slate-400 mt-1">
-                  Rotating the API key for{' '}
-                  <strong className="text-slate-200">
-                    Node #{rotateTarget.id} ({rotateTarget.name})
-                  </strong>{' '}
-                  will instantly invalidate the current key.
-                </p>
-              </div>
-            </div>
-
-            <div className="p-3 bg-amber-950/30 border border-amber-900/40 rounded-xl text-xs text-amber-300 space-y-1">
-              <p className="font-semibold">⚠️ Requires Hardware Firmware Update</p>
-              <p className="text-slate-400">
-                Any ESP32 sending binary measurement batches with the old key will be rejected with HTTP 401 until re-flashed or configured with the newly generated key.
-              </p>
-            </div>
-
-            <div className="flex justify-end gap-2 border-t border-slate-800 pt-3">
-              <button
-                onClick={() => setRotateTarget(null)}
-                disabled={isRotating}
-                className="px-3 py-2 bg-slate-800 hover:bg-slate-700 text-slate-300 rounded-lg text-xs font-semibold transition"
-              >
-                Cancel
-              </button>
-              <button
-                onClick={handleConfirmRotate}
-                disabled={isRotating}
-                className="flex items-center gap-1.5 px-4 py-2 bg-amber-600 hover:bg-amber-500 text-white rounded-lg text-xs font-bold transition disabled:opacity-50"
-              >
-                {isRotating ? (
-                  <>
-                    <RefreshCw className="w-3.5 h-3.5 animate-spin" />
-                    <span>Rotating Key...</span>
-                  </>
-                ) : (
-                  <>
-                    <Key className="w-3.5 h-3.5" />
-                    <span>Confirm Key Rotation</span>
-                  </>
-                )}
-              </button>
-            </div>
-          </div>
-        </div>
-      )}
-
-      {/* ================= DELETE NODE CONFIRMATION MODAL ================= */}
-      {deleteTarget && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-950/80 backdrop-blur-sm animate-fade-in">
-          <div className="bg-slate-900 border border-rose-900/60 rounded-2xl max-w-md w-full p-6 shadow-2xl space-y-4">
-            <div className="flex items-start gap-3">
-              <div className="p-3 bg-rose-950 text-rose-400 rounded-xl border border-rose-800 shrink-0">
-                <Trash2 className="w-6 h-6" />
-              </div>
-              <div>
-                <h3 className="text-base font-bold text-white">Decommission Hardware Node?</h3>
-                <p className="text-xs text-slate-400 mt-1">
-                  You are about to decommission and delete{' '}
-                  <strong className="text-slate-200">
-                    Node #{deleteTarget.id} ({deleteTarget.name})
-                  </strong>
-                  .
-                </p>
-              </div>
-            </div>
-
-            <div className="p-3 bg-rose-950/30 border border-rose-900/40 rounded-xl text-xs text-rose-300 space-y-1">
-              <p className="font-semibold">⚠️ Full Node Removal</p>
-              <p className="text-slate-400">
-                This will delete the node entry, its calibration settings, and all associated telemetry records permanently.
-              </p>
-            </div>
-
-            <div className="flex justify-end gap-2 border-t border-slate-800 pt-3">
-              <button
-                onClick={() => setDeleteTarget(null)}
-                disabled={isDeleting}
-                className="px-3 py-2 bg-slate-800 hover:bg-slate-700 text-slate-300 rounded-lg text-xs font-semibold transition"
-              >
-                Cancel
-              </button>
-              <button
-                onClick={handleConfirmDelete}
-                disabled={isDeleting}
-                className="flex items-center gap-1.5 px-4 py-2 bg-rose-600 hover:bg-rose-500 text-white rounded-lg text-xs font-bold transition disabled:opacity-50"
-              >
-                {isDeleting ? (
-                  <>
-                    <RefreshCw className="w-3.5 h-3.5 animate-spin" />
-                    <span>Deleting...</span>
-                  </>
-                ) : (
-                  <>
-                    <Trash2 className="w-3.5 h-3.5" />
-                    <span>Decommission Node</span>
-                  </>
-                )}
-              </button>
-            </div>
-          </div>
-        </div>
-      )}
+        );
+      })()}
     </div>
   );
 };
-
-export default NodeManagementPanel;

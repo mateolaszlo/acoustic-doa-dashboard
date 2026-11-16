@@ -49,7 +49,7 @@ cp .env.example .env   # Required for npm run dev: set VITE_BACKEND_HTTPS_URL (e
 npm run dev
 ```
 
-Open `http://localhost:5173` in your browser. Vite fails fast on `npm run dev` if `.env` is missing `VITE_BACKEND_HTTPS_URL`, and otherwise forwards `/api` requests over HTTPS to the separate backend gateway.
+Open `https://localhost:5173` in your browser (Vite auto-generates local SAN certificates in `certs/` on first start, or keep HTTP by setting `VITE_ENABLE_HTTPS=false`). Vite fails fast on `npm run dev` if `.env` is missing `VITE_BACKEND_HTTPS_URL`, and otherwise forwards `/api` requests over HTTPS to the separate backend gateway.
 
 ### 4. Run Unit Tests
 ```bash

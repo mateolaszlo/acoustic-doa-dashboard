@@ -4,7 +4,6 @@ import {
   Radio,
   BookOpen,
   Shield,
-  LogIn,
   LogOut,
   User,
   Volume2,
@@ -15,7 +14,7 @@ import {
 } from 'lucide-react';
 import { useAuth } from '../../context/AuthContext.js';
 import { DeviceSummary, DashboardMode } from '../../types/api_types.js';
-import { extractApiErrorMessage, formatClientError } from '../../services/error_messages.js';
+import { apiRequestJson } from '../../services/api_client.js';
 
 interface HeaderProps {
   deviceId: number;
@@ -46,22 +45,16 @@ export const Header: React.FC<HeaderProps> = ({
   onReconnect,
   onDeviceError,
 }) => {
-  const { user, isAuthenticated, isAdmin, logout } = useAuth();
+  const { user, isAdmin, logout } = useAuth();
   const [devices, setDevices] = useState<DeviceSummary[]>([]);
 
   useEffect(() => {
     let cancelled = false;
-    fetch('/api/v1/devices', { credentials: 'include' })
-      .then(async (res) => {
-        if (!res.ok) {
-          const msg = await extractApiErrorMessage(res, 'Failed to load hardware node list.');
-          if (!cancelled) onDeviceError?.(msg);
-          return null;
-        }
-        return res.json();
-      })
+    apiRequestJson<DeviceSummary[]>('/api/v1/devices', {
+      fallbackError: 'Unable to load hardware node list.',
+    })
       .then((data) => {
-        if (cancelled || !data) return;
+        if (cancelled) return;
         onDeviceError?.(null);
         if (Array.isArray(data) && data.length > 0) {
           setDevices(data);
@@ -69,7 +62,7 @@ export const Header: React.FC<HeaderProps> = ({
       })
       .catch((err) => {
         if (!cancelled) {
-          onDeviceError?.(formatClientError(err, 'Unable to load hardware node list.'));
+          onDeviceError?.(err instanceof Error ? err.message : 'Unable to load hardware node list.');
         }
       });
     return () => {
@@ -158,48 +151,32 @@ export const Header: React.FC<HeaderProps> = ({
             </button>
 
             {/* Role & Auth Portal */}
-            {isAuthenticated ? (
-              <div className="flex items-center gap-2">
-                <div
-                  className={`flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-semibold border ${
-                    isAdmin
-                      ? 'bg-purple-950/80 border-purple-800 text-purple-300'
-                      : 'bg-blue-950/80 border-blue-800 text-blue-300'
-                  }`}
-                >
-                  {isAdmin ? (
-                    <Shield className="w-3.5 h-3.5 text-purple-400" />
-                  ) : (
-                    <User className="w-3.5 h-3.5 text-blue-400" />
-                  )}
-                  <span>
-                    {isAdmin ? 'ADMIN' : 'VIEWER'}: {user?.username}
-                  </span>
-                </div>
-                <button
-                  onClick={logout}
-                  title="Sign Out"
-                  className="flex items-center gap-1 px-2.5 py-1.5 bg-slate-900 hover:bg-slate-800 text-slate-300 border border-slate-800 rounded-lg text-xs font-semibold transition"
-                >
-                  <LogOut className="w-3.5 h-3.5 text-rose-400" />
-                  <span className="hidden sm:inline">Sign Out</span>
-                </button>
+            <div className="flex items-center gap-2">
+              <div
+                className={`flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-semibold border ${
+                  isAdmin
+                    ? 'bg-purple-950/80 border-purple-800 text-purple-300'
+                    : 'bg-blue-950/80 border-blue-800 text-blue-300'
+                }`}
+              >
+                {isAdmin ? (
+                  <Shield className="w-3.5 h-3.5 text-purple-400" />
+                ) : (
+                  <User className="w-3.5 h-3.5 text-blue-400" />
+                )}
+                <span>
+                  {isAdmin ? 'ADMIN' : 'VIEWER'}: {user?.username}
+                </span>
               </div>
-            ) : (
-              <div className="flex items-center gap-2">
-                <div className="flex items-center gap-1.5 px-2.5 py-1.5 bg-slate-900 border border-slate-800 text-slate-400 rounded-lg text-xs font-semibold">
-                  <span className="w-2 h-2 rounded-full bg-slate-500" />
-                  <span className="hidden sm:inline">VIEWER MODE</span>
-                </div>
-                <button
-                  onClick={onOpenAuth}
-                  className="flex items-center gap-1.5 px-3 py-1.5 bg-emerald-600 hover:bg-emerald-500 text-white rounded-lg text-xs font-semibold transition shadow-md shadow-emerald-950/50"
-                >
-                  <LogIn className="w-3.5 h-3.5" />
-                  <span>Sign In</span>
-                </button>
-              </div>
-            )}
+              <button
+                onClick={logout}
+                title="Sign Out"
+                className="flex items-center gap-1 px-2.5 py-1.5 bg-slate-900 hover:bg-slate-800 text-slate-300 border border-slate-800 rounded-lg text-xs font-semibold transition"
+              >
+                <LogOut className="w-3.5 h-3.5 text-rose-400" />
+                <span className="hidden sm:inline">Sign Out</span>
+              </button>
+            </div>
           </div>
         </div>
 
@@ -278,5 +255,3 @@ export const Header: React.FC<HeaderProps> = ({
     </header>
   );
 };
-
-export default Header;

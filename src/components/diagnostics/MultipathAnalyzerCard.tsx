@@ -165,5 +165,3 @@ export const MultipathAnalyzerCard: React.FC<MultipathAnalyzerCardProps> = ({
     </div>
   );
 };
-
-export default MultipathAnalyzerCard;

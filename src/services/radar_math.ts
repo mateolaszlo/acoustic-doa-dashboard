@@ -57,3 +57,21 @@ export function getDirectionBadge(angleDeg: number): { label: string; badgeClass
     return { label, badgeClass: 'bg-slate-800 text-slate-300 border-slate-700' };
   }
 }
+
+/**
+ * Adds a rounded rectangle path, falling back to a sharp rectangle on older contexts.
+ */
+export function drawRoundedRect(
+  ctx: CanvasRenderingContext2D,
+  x: number,
+  y: number,
+  w: number,
+  h: number,
+  radius: number
+): void {
+  if (typeof ctx.roundRect === 'function') {
+    ctx.roundRect(x, y, w, h, radius);
+  } else {
+    ctx.rect(x, y, w, h);
+  }
+}

@@ -4,6 +4,7 @@ import {
   ActiveSpeechBurst,
   MeetingSessionAnalytics,
 } from '../../types/api_types';
+import { drawRoundedRect } from '../../services/radar_math.js';
 import { Download, Activity, Clock } from 'lucide-react';
 
 interface DiarizationTimelineProps {
@@ -198,11 +199,7 @@ export const DiarizationTimeline: React.FC<DiarizationTimelineProps> = ({
 
         // Segment fill
         ctx.beginPath();
-        if (ctx.roundRect) {
-          ctx.roundRect(xStart, y, segWidth, h, 3);
-        } else {
-          ctx.rect(xStart, y, segWidth, h);
-        }
+        drawRoundedRect(ctx, xStart, y, segWidth, h, 3);
 
         if (seg.isCrossTalk) {
           ctx.fillStyle = 'rgba(244, 63, 94, 0.9)';
@@ -233,11 +230,7 @@ export const DiarizationTimeline: React.FC<DiarizationTimelineProps> = ({
         ctx.shadowBlur = 8;
 
         ctx.beginPath();
-        if (ctx.roundRect) {
-          ctx.roundRect(xStart, y, burstWidth, h, 3);
-        } else {
-          ctx.rect(xStart, y, burstWidth, h);
-        }
+        drawRoundedRect(ctx, xStart, y, burstWidth, h, 3);
 
         if (burst.isCrossTalk) {
           ctx.fillStyle = 'rgba(244, 63, 94, 0.95)';
@@ -397,5 +390,3 @@ export const DiarizationTimeline: React.FC<DiarizationTimelineProps> = ({
     </div>
   );
 };
-
-export default DiarizationTimeline;

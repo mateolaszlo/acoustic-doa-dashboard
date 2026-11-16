@@ -345,5 +345,3 @@ export const EventLogTable: React.FC<EventLogTableProps> = ({
     </div>
   );
 };
-
-export default EventLogTable;

@@ -32,7 +32,7 @@ function AuthenticatedDashboard() {
   const [mode, setMode] = useState<DashboardMode>('MEETING');
   const [deviceId, setDeviceId] = useState(1);
   const [isAudioEnabled, setIsAudioEnabled] = useState(false);
-  const { token, isAdmin } = useAuth();
+  const { isAdmin } = useAuth();
   const [isAuthModalOpen, setIsAuthModalOpen] = useState(false);
   const [isZoneEditorOpen, setIsZoneEditorOpen] = useState(false);
   const [isStudioModalOpen, setIsStudioModalOpen] = useState(false);
@@ -92,7 +92,7 @@ function AuthenticatedDashboard() {
     refreshConfig,
     updateConfig,
     calibrateZeroAngle,
-  } = useDeviceConfig(deviceId, token, latestDeviceConfig);
+  } = useDeviceConfig(deviceId, latestDeviceConfig);
 
   // Spatial zones & acoustic geofences
   const {
@@ -101,7 +101,7 @@ function AuthenticatedDashboard() {
     clearError: clearZonesError,
     reloadZones,
     saveZones,
-  } = useSpatialZones(deviceId, token, latestZonesConfig);
+  } = useSpatialZones(deviceId, latestZonesConfig);
 
   const primaryEvent = recentEvents[0];
 
@@ -134,7 +134,6 @@ function AuthenticatedDashboard() {
     setDraggingStudio,
   } = useMultiCameraDirector({
     deviceId,
-    token,
     isAdmin,
     latestDirectorState,
     latestStudioConfig,
@@ -602,5 +601,3 @@ export function App() {
 
   return <AuthenticatedDashboard />;
 }
-
-export default App;

@@ -225,5 +225,3 @@ export const LandingLoginPage: React.FC = () => {
     </div>
   );
 };
-
-export default LandingLoginPage;

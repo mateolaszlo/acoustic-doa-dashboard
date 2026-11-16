@@ -325,5 +325,3 @@ export const CameraStudioConfigModal: React.FC<CameraStudioConfigModalProps> = (
     </div>
   );
 };
-
-export default CameraStudioConfigModal;

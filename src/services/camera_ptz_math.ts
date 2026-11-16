@@ -180,22 +180,23 @@ export function computeDefaultChairs(
     return chairs;
   }
 
+  const placeCardinalSeats = (count: number): CustomChair[] => {
+    const positions = [
+      { x: centerX, y: tableY - 14 }, // North
+      { x: tableX + tableW + 14, y: centerY }, // East
+      { x: centerX, y: tableY + tableH + 14 }, // South
+      { x: tableX - 14, y: centerY }, // West
+    ];
+    return positions.slice(0, count).map((pos, i) => ({
+      id: `chair-${i}`,
+      xRatio: pos.x / roomWidth,
+      yRatio: pos.y / roomHeight,
+    }));
+  };
+
   if (layout.tableShape === 'hollow_square') {
     if (totalSeats <= 4) {
-      const defaultPositions = [
-        { x: centerX, y: tableY - 14 }, // North
-        { x: tableX + tableW + 14, y: centerY }, // East
-        { x: centerX, y: tableY + tableH + 14 }, // South
-        { x: tableX - 14, y: centerY }, // West
-      ];
-      for (let i = 0; i < totalSeats; i++) {
-        chairs.push({
-          id: `chair-${i}`,
-          xRatio: defaultPositions[i].x / roomWidth,
-          yRatio: defaultPositions[i].y / roomHeight,
-        });
-      }
-      return chairs;
+      return placeCardinalSeats(totalSeats);
     }
 
     const perSide = Math.max(1, Math.floor(totalSeats / 4));
@@ -243,20 +244,7 @@ export function computeDefaultChairs(
   }
 
   if (totalSeats <= 4) {
-    const pts = [
-      { x: centerX, y: tableY - 14 }, // North
-      { x: tableX + tableW + 14, y: centerY }, // East
-      { x: centerX, y: tableY + tableH + 14 }, // South
-      { x: tableX - 14, y: centerY }, // West
-    ];
-    for (let i = 0; i < totalSeats; i++) {
-      chairs.push({
-        id: `chair-${i}`,
-        xRatio: pts[i].x / roomWidth,
-        yRatio: pts[i].y / roomHeight,
-      });
-    }
-    return chairs;
+    return placeCardinalSeats(totalSeats);
   }
 
   // totalSeats > 4 for Oval

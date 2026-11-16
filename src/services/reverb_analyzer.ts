@@ -40,22 +40,35 @@ export function analyzeMultipath(
   const reflections: MultipathReflection[] = [];
   let reverbEnergySum = 0;
 
+  const pushReflection = (
+    slotId: number,
+    angleDeg: number,
+    delayUs: number,
+    soundLevelDb: number,
+    confidence: number
+  ) => {
+    reverbEnergySum += Math.pow(10, soundLevelDb / 10);
+    reflections.push({
+      slotId,
+      angleDeg,
+      delayUs,
+      soundLevelDb,
+      confidence,
+      deltaAngleDeg: Math.abs(shortestAngleDiff(angleDeg, directAngleDeg)),
+      relativeSplDb: soundLevelDb - directSplDb,
+    });
+  };
+
   // Process secondary tracks as potential reflections
   for (const track of secondaryTracks) {
-    const deltaAngle = Math.abs(shortestAngleDiff(track.angleDeg, directAngleDeg));
-    const relativeSpl = track.soundLevelDb - directSplDb;
-    const energy = Math.pow(10, track.soundLevelDb / 10);
-    reverbEnergySum += energy;
-
-    reflections.push({
-      slotId: track.trackSlot,
-      angleDeg: track.angleDeg,
-      delayUs: Math.round((Math.sin((track.angleDeg * Math.PI) / 180) * 0.042 / 343) * 1e6),
-      soundLevelDb: track.soundLevelDb,
-      confidence: track.confidence,
-      deltaAngleDeg: deltaAngle,
-      relativeSplDb: relativeSpl,
-    });
+    const projectedDelayUs = Math.round((Math.sin((track.angleDeg * Math.PI) / 180) * 0.042 / 343) * 1e6);
+    pushReflection(
+      track.trackSlot,
+      track.angleDeg,
+      projectedDelayUs,
+      track.soundLevelDb,
+      track.confidence
+    );
   }
 
   // If no secondary tracks exist, inspect recent events with secondary slotId (slot 1)
@@ -67,20 +80,13 @@ export function analyzeMultipath(
 
     if (secondaryEvents.length > 0) {
       const latestSec = secondaryEvents[secondaryEvents.length - 1];
-      const deltaAngle = Math.abs(shortestAngleDiff(latestSec.angleDeg, directAngleDeg));
-      const relativeSpl = latestSec.soundLevelDb - directSplDb;
-      const energy = Math.pow(10, latestSec.soundLevelDb / 10);
-      reverbEnergySum += energy;
-
-      reflections.push({
-        slotId: 1,
-        angleDeg: latestSec.angleDeg,
-        delayUs: latestSec.delayUs,
-        soundLevelDb: latestSec.soundLevelDb,
-        confidence: latestSec.confidence,
-        deltaAngleDeg: deltaAngle,
-        relativeSplDb: relativeSpl,
-      });
+      pushReflection(
+        1,
+        latestSec.angleDeg,
+        latestSec.delayUs,
+        latestSec.soundLevelDb,
+        latestSec.confidence
+      );
     }
   }
 
