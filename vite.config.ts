@@ -1,5 +1,44 @@
+import fs from 'node:fs';
+import path from 'node:path';
 import { defineConfig, loadEnv } from 'vite';
 import react from '@vitejs/plugin-react';
+
+function resolveHttpsOptions(
+  env: Record<string, string>,
+  shouldValidate: boolean
+): { key: Buffer; cert: Buffer } | undefined {
+  const enableRaw = (env.VITE_ENABLE_HTTPS || process.env.VITE_ENABLE_HTTPS || '').trim().toLowerCase();
+  if (enableRaw !== 'true') {
+    return undefined;
+  }
+
+  const keyPathRaw =
+    env.VITE_SSL_KEY_PATH ||
+    process.env.VITE_SSL_KEY_PATH ||
+    '../acoustic-doa-backend/certs/server.key';
+  const certPathRaw =
+    env.VITE_SSL_CERT_PATH ||
+    process.env.VITE_SSL_CERT_PATH ||
+    '../acoustic-doa-backend/certs/server.cert';
+
+  const keyPath = path.resolve(process.cwd(), keyPathRaw);
+  const certPath = path.resolve(process.cwd(), certPathRaw);
+
+  if (shouldValidate && (!fs.existsSync(keyPath) || !fs.existsSync(certPath))) {
+    throw new Error(
+      `[FATAL] VITE_ENABLE_HTTPS=true but TLS certificate files were not found (key: ${keyPath}, cert: ${certPath}). Generate certs in acoustic-doa-backend (certs/generate_certs.sh) or set VITE_ENABLE_HTTPS=false in acoustic-doa-dashboard/.env`
+    );
+  }
+
+  if (!fs.existsSync(keyPath) || !fs.existsSync(certPath)) {
+    return undefined;
+  }
+
+  return {
+    key: fs.readFileSync(keyPath),
+    cert: fs.readFileSync(certPath),
+  };
+}
 
 export default defineConfig(({ command, mode }) => {
   const env = loadEnv(mode, process.cwd(), '');
@@ -18,10 +57,13 @@ export default defineConfig(({ command, mode }) => {
     );
   }
 
+  const httpsOptions = resolveHttpsOptions(env, command === 'serve' && !isTest);
+
   return {
     plugins: [react()],
     server: {
       port: 5173,
+      ...(httpsOptions ? { https: httpsOptions } : {}),
       proxy: {
         '/api': {
           target: backendTarget,
@@ -30,5 +72,6 @@ export default defineConfig(({ command, mode }) => {
         },
       },
     },
+    ...(httpsOptions ? { preview: { https: httpsOptions } } : {}),
   };
 });
