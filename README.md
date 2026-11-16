@@ -38,9 +38,10 @@ A real-time, browser-based 360° polar radar visualizer, telemetry monitor, and 
 - npm 10.x or higher
 - Running `acoustic-doa-backend` server on port 3000 / 3443
 
-### 2. Installation
+### 2. Installation & Environment
 ```bash
 npm install
+cp .env.example .env   # Required for npm run dev: set VITE_BACKEND_HTTPS_URL (e.g. https://localhost:3443 or 8443)
 ```
 
 ### 3. Run Development Server
@@ -48,7 +49,7 @@ npm install
 npm run dev
 ```
 
-Open `http://localhost:5173` in your browser. The Vite proxy forwards `/api` requests over HTTPS to the separate backend gateway (`https://localhost:3443`, overridable via `VITE_BACKEND_HTTPS_URL`).
+Open `http://localhost:5173` in your browser. Vite fails fast on `npm run dev` if `.env` is missing `VITE_BACKEND_HTTPS_URL`, and otherwise forwards `/api` requests over HTTPS to the separate backend gateway.
 
 ### 4. Run Unit Tests
 ```bash
