@@ -1,6 +1,7 @@
 import React, { useState, useEffect, useCallback } from 'react';
 import { useAuth } from '../../context/AuthContext.js';
 import { UserRecord, UserRole } from '../../types/api_types.js';
+import { extractApiErrorMessage, formatClientError } from '../../services/error_messages.js';
 import { Users, Shield, User, Trash2, RefreshCw, AlertCircle, CheckCircle2 } from 'lucide-react';
 
 export const UserManagementPanel: React.FC = () => {
@@ -24,13 +25,14 @@ export const UserManagementPanel: React.FC = () => {
       });
 
       if (!res.ok) {
-        throw new Error(`Failed to load users (HTTP ${res.status})`);
+        const message = await extractApiErrorMessage(res, 'Failed to load users.');
+        throw new Error(message);
       }
 
       const data = await res.json();
       setUsers(data.users || []);
-    } catch (err: any) {
-      setError(err.message || 'Error loading users');
+    } catch (err) {
+      setError(formatClientError(err, 'Failed to load users.'));
     } finally {
       setLoading(false);
     }
@@ -54,16 +56,17 @@ export const UserManagementPanel: React.FC = () => {
         body: JSON.stringify({ role: newRole }),
       });
 
-      const data = await res.json();
       if (!res.ok) {
-        throw new Error(data.error?.message || 'Failed to update user role');
+        const message = await extractApiErrorMessage(res, 'Failed to update user role.');
+        throw new Error(message);
       }
 
+      const data = await res.json();
       setSuccessMsg(data.message || 'User role updated');
       setTimeout(() => setSuccessMsg(null), 4000);
       fetchUsers();
-    } catch (err: any) {
-      setError(err.message);
+    } catch (err) {
+      setError(formatClientError(err, 'Failed to update user role.'));
     }
   };
 
@@ -84,16 +87,17 @@ export const UserManagementPanel: React.FC = () => {
         headers,
       });
 
-      const data = await res.json();
       if (!res.ok) {
-        throw new Error(data.error?.message || 'Failed to delete user');
+        const message = await extractApiErrorMessage(res, 'Failed to delete user.');
+        throw new Error(message);
       }
 
+      await res.json().catch(() => null);
       setSuccessMsg(`User '${username}' deleted`);
       setTimeout(() => setSuccessMsg(null), 4000);
       fetchUsers();
-    } catch (err: any) {
-      setError(err.message);
+    } catch (err) {
+      setError(formatClientError(err, 'Failed to delete user.'));
     }
   };
 

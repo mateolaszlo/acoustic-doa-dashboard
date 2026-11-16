@@ -1,5 +1,6 @@
 import { useState, useEffect, useCallback } from 'react';
 import { SpatialZone, ZonesConfigSsePayload } from '../types/api_types';
+import { extractApiErrorMessage, formatClientError } from '../services/error_messages.js';
 
 export const DEFAULT_SPATIAL_ZONES: SpatialZone[] = [
   { name: 'Podium / Stage', min_angle_deg: -30.0, max_angle_deg: 30.0, color: '#10b981', alert_threshold_db: 75.0 },
@@ -17,6 +18,8 @@ export function useSpatialZones(
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
+  const clearError = useCallback(() => setError(null), []);
+
   const fetchZones = useCallback(async () => {
     setLoading(true);
     setError(null);
@@ -30,7 +33,8 @@ export function useSpatialZones(
         headers,
       });
       if (!res.ok) {
-        throw new Error(`Failed to load zones (HTTP ${res.status})`);
+        const message = await extractApiErrorMessage(res, 'Failed to load spatial zones.');
+        throw new Error(message);
       }
       const data: SpatialZone[] = await res.json();
       if (Array.isArray(data) && data.length > 0) {
@@ -38,9 +42,10 @@ export function useSpatialZones(
       } else {
         setZones(DEFAULT_SPATIAL_ZONES);
       }
-    } catch (err: any) {
-      console.warn('[useSpatialZones] Falling back to default zones:', err.message);
-      // Keep default zones on network error
+    } catch (err) {
+      const message = formatClientError(err, 'Failed to load spatial zones.');
+      console.warn('[useSpatialZones] Falling back to default zones:', message);
+      setError(message);
     } finally {
       setLoading(false);
     }
@@ -53,6 +58,7 @@ export function useSpatialZones(
   useEffect(() => {
     if (latestZonesConfig && latestZonesConfig.deviceId === deviceId && Array.isArray(latestZonesConfig.zones)) {
       setZones(latestZonesConfig.zones);
+      setError(null);
     }
   }, [latestZonesConfig, deviceId]);
 
@@ -73,8 +79,7 @@ export function useSpatialZones(
       });
 
       if (!res.ok) {
-        const body = await res.json().catch(() => ({}));
-        const msg = body.error?.message || `Failed to update zones (HTTP ${res.status})`;
+        const msg = await extractApiErrorMessage(res, 'Failed to update spatial zones.');
         setError(msg);
         return { success: false, error: msg };
       }
@@ -86,9 +91,10 @@ export function useSpatialZones(
         setZones(newZones);
       }
       return { success: true };
-    } catch (err: any) {
-      setError(err.message);
-      return { success: false, error: err.message };
+    } catch (err) {
+      const msg = formatClientError(err, 'Failed to save spatial zones.');
+      setError(msg);
+      return { success: false, error: msg };
     } finally {
       setLoading(false);
     }
@@ -98,6 +104,7 @@ export function useSpatialZones(
     zones,
     loading,
     error,
+    clearError,
     reloadZones: fetchZones,
     saveZones,
   };

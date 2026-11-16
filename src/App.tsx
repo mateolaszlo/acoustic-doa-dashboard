@@ -22,8 +22,9 @@ import { useMeetingDiarization } from './hooks/useMeetingDiarization.js';
 import { useMultiCameraDirector } from './hooks/useMultiCameraDirector.js';
 import { useAuth } from './context/AuthContext.js';
 import { playSonarPing } from './services/audio_chime.js';
+import { formatClientError } from './services/error_messages.js';
 import { DashboardMode } from './types/api_types.js';
-import { Sliders, PieChart, ListFilter, Users, Cpu, MapPin, Radar } from 'lucide-react';
+import { Sliders, PieChart, ListFilter, Users, Cpu, MapPin, Radar, AlertTriangle, RefreshCw, X } from 'lucide-react';
 
 type TabType = 'calibration' | 'analytics' | 'logs' | 'users' | 'nodes';
 
@@ -36,10 +37,31 @@ function AuthenticatedDashboard() {
   const [isZoneEditorOpen, setIsZoneEditorOpen] = useState(false);
   const [isStudioModalOpen, setIsStudioModalOpen] = useState(false);
   const [activeTab, setActiveTab] = useState<TabType>('analytics');
+  const [deviceError, setDeviceError] = useState<string | null>(null);
+  const [runtimeError, setRuntimeError] = useState<string | null>(null);
+
+  // Capture unexpected uncaught browser errors / unhandled promise rejections cleanly
+  useEffect(() => {
+    const handleWindowError = (event: ErrorEvent) => {
+      setRuntimeError(formatClientError(event.error || event.message, 'An unexpected client error occurred.'));
+    };
+    const handleUnhandledRejection = (event: PromiseRejectionEvent) => {
+      setRuntimeError(formatClientError(event.reason, 'An unexpected background request failed.'));
+    };
+
+    window.addEventListener('error', handleWindowError);
+    window.addEventListener('unhandledrejection', handleUnhandledRejection);
+    return () => {
+      window.removeEventListener('error', handleWindowError);
+      window.removeEventListener('unhandledrejection', handleUnhandledRejection);
+    };
+  }, []);
 
   // Real-time Server-Sent Events stream from backend (only connects when authenticated)
   const {
     connected,
+    streamError,
+    clearStreamError,
     recentEvents,
     activeTracks,
     latestBatch,
@@ -65,13 +87,21 @@ function AuthenticatedDashboard() {
     config,
     loading: configLoading,
     error: configError,
+    clearError: clearConfigError,
     successMsg,
+    refreshConfig,
     updateConfig,
     calibrateZeroAngle,
   } = useDeviceConfig(deviceId, token, latestDeviceConfig);
 
   // Spatial zones & acoustic geofences
-  const { zones, saveZones } = useSpatialZones(deviceId, token, latestZonesConfig);
+  const {
+    zones,
+    error: zonesError,
+    clearError: clearZonesError,
+    reloadZones,
+    saveZones,
+  } = useSpatialZones(deviceId, token, latestZonesConfig);
 
   const primaryEvent = recentEvents[0];
 
@@ -92,6 +122,8 @@ function AuthenticatedDashboard() {
     liveCamId,
     directorConfig,
     roomLayout,
+    studioError,
+    clearStudioError,
     processDirectorFrame,
     setManualLiveCamera,
     setCameraCount,
@@ -127,6 +159,63 @@ function AuthenticatedDashboard() {
     }
   }, [primaryEvent?.timestampMs, isAudioEnabled]);
 
+  const statusAlerts = [
+    streamError
+      ? {
+          id: 'stream',
+          label: 'Live Telemetry Stream',
+          message: streamError,
+          onRetry: reconnect,
+          retryLabel: 'Reconnect',
+          onDismiss: clearStreamError,
+        }
+      : null,
+    studioError
+      ? {
+          id: 'studio',
+          label: 'Studio Synchronization',
+          message: studioError,
+          onDismiss: clearStudioError,
+        }
+      : null,
+    zonesError
+      ? {
+          id: 'zones',
+          label: 'Spatial Zones',
+          message: zonesError,
+          onRetry: reloadZones,
+          retryLabel: 'Retry',
+          onDismiss: clearZonesError,
+        }
+      : null,
+    configError && !(mode === 'DSP' && activeTab === 'calibration')
+      ? {
+          id: 'config',
+          label: 'Device Configuration',
+          message: configError,
+          onRetry: refreshConfig,
+          retryLabel: 'Retry',
+          onDismiss: clearConfigError,
+        }
+      : null,
+    deviceError
+      ? {
+          id: 'devices',
+          label: 'Hardware Nodes',
+          message: deviceError,
+          onDismiss: () => setDeviceError(null),
+        }
+      : null,
+    runtimeError
+      ? {
+          id: 'runtime',
+          label: 'Application Error',
+          message: runtimeError,
+          onDismiss: () => setRuntimeError(null),
+        }
+      : null,
+  ].filter((a): a is NonNullable<typeof a> => a !== null);
+
   return (
     <div className="min-h-screen bg-slate-950 text-slate-100 flex flex-col font-sans">
       <Header
@@ -141,9 +230,49 @@ function AuthenticatedDashboard() {
         onSelectDevice={setDeviceId}
         onReconnect={reconnect}
         onOpenAuth={() => setIsAuthModalOpen(true)}
+        onDeviceError={setDeviceError}
       />
 
       <main className="flex-1 max-w-7xl w-full mx-auto p-4 lg:p-8 space-y-6">
+        {statusAlerts.length > 0 && (
+          <div className="space-y-2" aria-live="polite">
+            {statusAlerts.map((alert) => (
+              <div
+                key={alert.id}
+                role="alert"
+                className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 px-4 py-3 rounded-xl bg-rose-950/60 border border-rose-800/80 text-rose-200 text-xs shadow-lg"
+              >
+                <div className="flex items-start gap-2.5">
+                  <AlertTriangle className="w-4 h-4 text-rose-400 shrink-0 mt-0.5" />
+                  <div>
+                    <span className="font-bold text-rose-100 mr-1.5">{alert.label}:</span>
+                    <span>{alert.message}</span>
+                  </div>
+                </div>
+                <div className="flex items-center gap-2 shrink-0 self-end sm:self-center">
+                  {alert.onRetry && (
+                    <button
+                      type="button"
+                      onClick={alert.onRetry}
+                      className="inline-flex items-center gap-1 px-2.5 py-1 rounded-md bg-rose-900/70 hover:bg-rose-800 text-rose-100 font-semibold transition"
+                    >
+                      <RefreshCw className="w-3 h-3" />
+                      <span>{alert.retryLabel || 'Retry'}</span>
+                    </button>
+                  )}
+                  <button
+                    type="button"
+                    onClick={alert.onDismiss}
+                    aria-label={`Dismiss ${alert.label} error`}
+                    className="p-1 rounded-md text-rose-300 hover:text-white hover:bg-rose-900/60 transition"
+                  >
+                    <X className="w-3.5 h-3.5" />
+                  </button>
+                </div>
+              </div>
+            ))}
+          </div>
+        )}
         {mode === 'MEETING' ? (
           /* ========================================================================= */
           /* FACE A: SMART MEETING & ROOM DIRECTOR (VIEWER / DEFAULT MODE)             */

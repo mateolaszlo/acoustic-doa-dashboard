@@ -1,6 +1,7 @@
 import React, { useState, useEffect, useCallback } from 'react';
 import { useAuth } from '../../context/AuthContext.js';
 import { DeviceAdminDetails } from '../../types/api_types.js';
+import { extractApiErrorMessage, formatClientError } from '../../services/error_messages.js';
 import {
   Cpu,
   Key,
@@ -79,13 +80,14 @@ export const NodeManagementPanel: React.FC<NodeManagementPanelProps> = ({
       });
 
       if (!res.ok) {
-        throw new Error(`Failed to load hardware nodes (HTTP ${res.status})`);
+        const message = await extractApiErrorMessage(res, 'Failed to load hardware nodes.');
+        throw new Error(message);
       }
 
       const data = await res.json();
       setNodes(Array.isArray(data) ? data : []);
-    } catch (err: any) {
-      setError(err.message || 'Error fetching nodes');
+    } catch (err) {
+      setError(formatClientError(err, 'Unable to load hardware nodes.'));
     } finally {
       setLoading(false);
     }
@@ -110,7 +112,7 @@ export const NodeManagementPanel: React.FC<NodeManagementPanelProps> = ({
       setCopiedKeyId(nodeId);
       setTimeout(() => setCopiedKeyId(null), 2500);
     } catch {
-      // Fallback
+      setError('Unable to copy API key to clipboard. Please select and copy the key manually.');
     }
   };
 
@@ -133,16 +135,17 @@ export const NodeManagementPanel: React.FC<NodeManagementPanelProps> = ({
         body: JSON.stringify({ name: editingName.trim() }),
       });
 
-      const data = await res.json();
       if (!res.ok) {
-        throw new Error(data.error?.message || 'Failed to rename node');
+        const message = await extractApiErrorMessage(res, 'Failed to rename node.');
+        throw new Error(message);
       }
 
+      const data = await res.json();
       showSuccess(`Node #${nodeId} renamed to "${data.name}"`);
       setEditingNodeId(null);
       fetchNodes();
-    } catch (err: any) {
-      setError(err.message);
+    } catch (err) {
+      setError(formatClientError(err, 'Failed to rename hardware node.'));
     }
   };
 
@@ -167,11 +170,12 @@ export const NodeManagementPanel: React.FC<NodeManagementPanelProps> = ({
         body: JSON.stringify(payload),
       });
 
-      const data = await res.json();
       if (!res.ok) {
-        throw new Error(data.error?.message || 'Failed to register node');
+        const message = await extractApiErrorMessage(res, 'Failed to register hardware node.');
+        throw new Error(message);
       }
 
+      const data = await res.json();
       setRegisteredSuccessInfo({
         id: data.id,
         name: data.name,
@@ -180,8 +184,8 @@ export const NodeManagementPanel: React.FC<NodeManagementPanelProps> = ({
       setNewName('');
       setNewCustomApiKey('');
       fetchNodes();
-    } catch (err: any) {
-      setError(err.message);
+    } catch (err) {
+      setError(formatClientError(err, 'Failed to register hardware node.'));
     } finally {
       setIsSubmittingNew(false);
     }
@@ -201,18 +205,19 @@ export const NodeManagementPanel: React.FC<NodeManagementPanelProps> = ({
         headers,
       });
 
-      const data = await res.json();
       if (!res.ok) {
-        throw new Error(data.error?.message || 'Failed to rotate API key');
+        const message = await extractApiErrorMessage(res, 'Failed to rotate API key.');
+        throw new Error(message);
       }
 
+      await res.json().catch(() => null);
       showSuccess(`API Key for Node #${rotateTarget.id} successfully rotated`);
       setRotateTarget(null);
       // Auto reveal new key
       setRevealedKeys((prev) => ({ ...prev, [rotateTarget.id]: true }));
       fetchNodes();
-    } catch (err: any) {
-      setError(err.message);
+    } catch (err) {
+      setError(formatClientError(err, 'Failed to rotate API key.'));
     } finally {
       setIsRotating(false);
     }
@@ -232,16 +237,17 @@ export const NodeManagementPanel: React.FC<NodeManagementPanelProps> = ({
         headers,
       });
 
-      const data = await res.json();
       if (!res.ok) {
-        throw new Error(data.error?.message || 'Failed to purge measurements');
+        const message = await extractApiErrorMessage(res, 'Failed to purge measurements.');
+        throw new Error(message);
       }
 
+      const data = await res.json();
       showSuccess(`Purged ${data.deleted_records} measurements for Node #${purgeTarget.id}`);
       setPurgeTarget(null);
       fetchNodes();
-    } catch (err: any) {
-      setError(err.message);
+    } catch (err) {
+      setError(formatClientError(err, 'Failed to purge measurements.'));
     } finally {
       setIsPurging(false);
     }
@@ -261,16 +267,17 @@ export const NodeManagementPanel: React.FC<NodeManagementPanelProps> = ({
         headers,
       });
 
-      const data = await res.json();
       if (!res.ok) {
-        throw new Error(data.error?.message || 'Failed to decommission node');
+        const message = await extractApiErrorMessage(res, 'Failed to decommission node.');
+        throw new Error(message);
       }
 
+      await res.json().catch(() => null);
       showSuccess(`Node #${deleteTarget.id} decommissioned and deleted`);
       setDeleteTarget(null);
       fetchNodes();
-    } catch (err: any) {
-      setError(err.message);
+    } catch (err) {
+      setError(formatClientError(err, 'Failed to decommission node.'));
     } finally {
       setIsDeleting(false);
     }

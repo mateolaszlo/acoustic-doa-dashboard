@@ -15,6 +15,7 @@ import {
 } from 'lucide-react';
 import { useAuth } from '../../context/AuthContext.js';
 import { DeviceSummary, DashboardMode } from '../../types/api_types.js';
+import { extractApiErrorMessage, formatClientError } from '../../services/error_messages.js';
 
 interface HeaderProps {
   deviceId: number;
@@ -28,6 +29,7 @@ interface HeaderProps {
   onOpenAuth: () => void;
   onSelectDevice?: (id: number) => void;
   onReconnect?: () => void;
+  onDeviceError?: (error: string | null) => void;
 }
 
 export const Header: React.FC<HeaderProps> = ({
@@ -42,20 +44,38 @@ export const Header: React.FC<HeaderProps> = ({
   onOpenAuth,
   onSelectDevice,
   onReconnect,
+  onDeviceError,
 }) => {
   const { user, isAuthenticated, isAdmin, logout } = useAuth();
   const [devices, setDevices] = useState<DeviceSummary[]>([]);
 
   useEffect(() => {
+    let cancelled = false;
     fetch('/api/v1/devices', { credentials: 'include' })
-      .then((res) => (res.ok ? res.json() : []))
+      .then(async (res) => {
+        if (!res.ok) {
+          const msg = await extractApiErrorMessage(res, 'Failed to load hardware node list.');
+          if (!cancelled) onDeviceError?.(msg);
+          return null;
+        }
+        return res.json();
+      })
       .then((data) => {
+        if (cancelled || !data) return;
+        onDeviceError?.(null);
         if (Array.isArray(data) && data.length > 0) {
           setDevices(data);
         }
       })
-      .catch(() => {});
-  }, [connected]);
+      .catch((err) => {
+        if (!cancelled) {
+          onDeviceError?.(formatClientError(err, 'Unable to load hardware node list.'));
+        }
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [connected, onDeviceError]);
 
   return (
     <header className="border-b border-slate-800 bg-slate-950/90 backdrop-blur-md sticky top-0 z-50">

@@ -1,5 +1,6 @@
 import { useState, useEffect, useCallback } from 'react';
 import { DeviceCalibration, DeviceConfigSsePayload } from '../types/api_types.js';
+import { extractApiErrorMessage, formatClientError } from '../services/error_messages.js';
 
 export function useDeviceConfig(
   deviceId: number,
@@ -10,6 +11,8 @@ export function useDeviceConfig(
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [successMsg, setSuccessMsg] = useState<string | null>(null);
+
+  const clearError = useCallback(() => setError(null), []);
 
   const fetchConfig = useCallback(async () => {
     setLoading(true);
@@ -24,12 +27,13 @@ export function useDeviceConfig(
         headers,
       });
       if (!res.ok) {
-        throw new Error(`Failed to load config (HTTP ${res.status})`);
+        const message = await extractApiErrorMessage(res, 'Failed to load device configuration.');
+        throw new Error(message);
       }
       const data = await res.json();
       setConfig(data);
-    } catch (err: any) {
-      setError(err.message);
+    } catch (err) {
+      setError(formatClientError(err, 'Failed to load device configuration.'));
     } finally {
       setLoading(false);
     }
@@ -63,11 +67,11 @@ export function useDeviceConfig(
       });
 
       if (!res.ok) {
-        const body = await res.json().catch(() => ({}));
         if (res.status === 401 || res.status === 403) {
           throw new Error('Administrator privileges required to update calibration.');
         }
-        throw new Error(body.error?.message || `Failed to update config (HTTP ${res.status})`);
+        const message = await extractApiErrorMessage(res, 'Failed to update device configuration.');
+        throw new Error(message);
       }
 
       const updated = await res.json();
@@ -75,8 +79,8 @@ export function useDeviceConfig(
       setSuccessMsg('Configuration saved! ESP32 will synchronize on next poll (<=60s).');
       setTimeout(() => setSuccessMsg(null), 5000);
       return true;
-    } catch (err: any) {
-      setError(err.message);
+    } catch (err) {
+      setError(formatClientError(err, 'Failed to update device configuration.'));
       return false;
     } finally {
       setLoading(false);
@@ -103,7 +107,8 @@ export function useDeviceConfig(
         if (res.status === 401 || res.status === 403) {
           throw new Error('Administrator privileges required to trigger zero-angle trim.');
         }
-        throw new Error('Zero-angle calibration failed');
+        const message = await extractApiErrorMessage(res, 'Zero-angle calibration failed.');
+        throw new Error(message);
       }
 
       const result = await res.json();
@@ -111,8 +116,8 @@ export function useDeviceConfig(
       setSuccessMsg(`Zero-angle calibrated: offset adjusted to ${result.newOffset}° (${result.samplesUsed} samples)`);
       setTimeout(() => setSuccessMsg(null), 5000);
       return result;
-    } catch (err: any) {
-      setError(err.message);
+    } catch (err) {
+      setError(formatClientError(err, 'Zero-angle calibration failed.'));
       return null;
     } finally {
       setLoading(false);
@@ -123,6 +128,7 @@ export function useDeviceConfig(
     config,
     loading,
     error,
+    clearError,
     successMsg,
     refreshConfig: fetchConfig,
     updateConfig,

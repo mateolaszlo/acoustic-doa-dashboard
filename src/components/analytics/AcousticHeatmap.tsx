@@ -1,6 +1,7 @@
 import { useState, useEffect, useCallback } from 'react';
 import { AcousticStats, MeasurementBatchPayload } from '../../types/api_types.js';
-import { PieChart, BarChart3, RefreshCw, Compass, RotateCcw, X } from 'lucide-react';
+import { extractApiErrorMessage, formatClientError } from '../../services/error_messages.js';
+import { PieChart, BarChart3, RefreshCw, Compass, RotateCcw, X, AlertCircle } from 'lucide-react';
 
 interface AcousticHeatmapProps {
   deviceId: number;
@@ -12,6 +13,7 @@ export const AcousticHeatmap: React.FC<AcousticHeatmapProps> = ({ deviceId, late
   const [viewMode, setViewMode] = useState<'rose' | 'spectrum'>('rose');
   const [stats, setStats] = useState<AcousticStats | null>(null);
   const [loading, setLoading] = useState(false);
+  const [error, setError] = useState<string | null>(null);
   const [hoveredBin, setHoveredBin] = useState<{ index: number; angle: number; count: number } | null>(null);
   const [resetSinceMs, setResetSinceMs] = useState<number | null>(() => {
     const saved = sessionStorage.getItem(`acoustic_stats_reset_${deviceId}`);
@@ -28,12 +30,17 @@ export const AcousticHeatmap: React.FC<AcousticHeatmapProps> = ({ deviceId, late
           url += `&since_ms=${activeSince}`;
         }
         const res = await fetch(url, { credentials: 'include' });
-        if (res.ok) {
-          const data = await res.json();
-          setStats(data);
+        if (!res.ok) {
+          const message = await extractApiErrorMessage(res, 'Failed to load acoustic statistics.');
+          setError(message);
+          return;
         }
+        const data = await res.json();
+        setStats(data);
+        setError(null);
       } catch (err) {
         console.error('Failed to load stats:', err);
+        setError(formatClientError(err, 'Unable to load acoustic statistics.'));
       } finally {
         setLoading(false);
       }
@@ -238,6 +245,26 @@ export const AcousticHeatmap: React.FC<AcousticHeatmapProps> = ({ deviceId, late
           </button>
         </div>
       </div>
+
+      {/* Error Notice */}
+      {error && (
+        <div
+          role="alert"
+          className="flex items-center justify-between gap-2 p-3 text-xs bg-rose-950/60 border border-rose-800/80 text-rose-300 rounded-lg"
+        >
+          <div className="flex items-center gap-2">
+            <AlertCircle className="w-4 h-4 shrink-0 text-rose-400" />
+            <span>{error}</span>
+          </div>
+          <button
+            type="button"
+            onClick={() => fetchStats()}
+            className="px-2 py-1 bg-rose-900/60 hover:bg-rose-800/80 text-rose-100 rounded text-[11px] font-semibold transition shrink-0"
+          >
+            Retry
+          </button>
+        </div>
+      )}
 
       {/* Aggregate Stats Cards */}
       <div className="grid grid-cols-1 md:grid-cols-3 gap-3">

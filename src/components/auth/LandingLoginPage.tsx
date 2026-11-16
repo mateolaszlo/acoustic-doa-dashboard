@@ -3,7 +3,7 @@ import { useAuth } from '../../context/AuthContext.js';
 import { Radar, Lock, User, Mail, KeyRound, AlertCircle, ShieldCheck, Radio } from 'lucide-react';
 
 export const LandingLoginPage: React.FC = () => {
-  const { login, register } = useAuth();
+  const { login, register, sessionError, clearSessionError } = useAuth();
   const [tab, setTab] = useState<'login' | 'register'>('login');
   const [username, setUsername] = useState('');
   const [email, setEmail] = useState('');
@@ -14,6 +14,7 @@ export const LandingLoginPage: React.FC = () => {
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     setError(null);
+    clearSessionError();
     setLoading(true);
 
     try {
@@ -105,6 +106,7 @@ export const LandingLoginPage: React.FC = () => {
                 onClick={() => {
                   setTab('login');
                   setError(null);
+                  clearSessionError();
                 }}
                 className={`flex-1 py-1.5 text-xs font-semibold rounded-md transition ${
                   tab === 'login'
@@ -119,6 +121,7 @@ export const LandingLoginPage: React.FC = () => {
                 onClick={() => {
                   setTab('register');
                   setError(null);
+                  clearSessionError();
                 }}
                 className={`flex-1 py-1.5 text-xs font-semibold rounded-md transition ${
                   tab === 'register'
@@ -130,10 +133,13 @@ export const LandingLoginPage: React.FC = () => {
               </button>
             </div>
 
-            {error && (
-              <div className="flex items-center gap-2 p-3 mb-4 text-xs bg-rose-950/60 border border-rose-800/80 text-rose-300 rounded-lg">
-                <AlertCircle className="w-4 h-4 shrink-0" />
-                <span>{error}</span>
+            {(error || sessionError) && (
+              <div
+                role="alert"
+                className="flex items-start gap-2 p-3 mb-4 text-xs bg-rose-950/60 border border-rose-800/80 text-rose-300 rounded-lg"
+              >
+                <AlertCircle className="w-4 h-4 shrink-0 mt-0.5" />
+                <span>{error || sessionError}</span>
               </div>
             )}
 

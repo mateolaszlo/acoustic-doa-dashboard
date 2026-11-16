@@ -8,6 +8,7 @@ import {
   ZonesConfigSsePayload,
   DeviceConfigSsePayload,
 } from '../types/api_types.js';
+import { extractApiErrorMessage, formatClientError } from '../services/error_messages.js';
 
 interface UseSSEStreamOptions {
   deviceId: number;
@@ -16,6 +17,7 @@ interface UseSSEStreamOptions {
 
 export function useSSEStream({ deviceId, maxBufferLength = 500 }: UseSSEStreamOptions) {
   const [connected, setConnected] = useState(false);
+  const [streamError, setStreamError] = useState<string | null>(null);
   const [latestBatch, setLatestBatch] = useState<MeasurementBatchPayload | null>(null);
   const [latestDirectorState, setLatestDirectorState] = useState<DirectorTelemetryState | null>(null);
   const [latestStudioConfig, setLatestStudioConfig] = useState<StudioConfigPayload | null>(null);
@@ -31,16 +33,35 @@ export function useSSEStream({ deviceId, maxBufferLength = 500 }: UseSSEStreamOp
 
   const eventSourceRef = useRef<EventSource | null>(null);
 
+  const clearStreamError = useCallback(() => setStreamError(null), []);
+
   // Fetch initial global all-time count from database
   useEffect(() => {
+    let cancelled = false;
     fetch(`/api/v1/devices/${deviceId}/count`, { credentials: 'include' })
-      .then((res) => (res.ok ? res.json() : null))
+      .then(async (res) => {
+        if (!res.ok) {
+          const msg = await extractApiErrorMessage(res, 'Failed to load total event count.');
+          if (!cancelled) setStreamError(msg);
+          return null;
+        }
+        return res.json();
+      })
       .then((data) => {
-        if (data && typeof data.total === 'number') {
+        if (!cancelled && data && typeof data.total === 'number') {
           setGlobalEventCount(data.total);
         }
       })
-      .catch((err) => console.warn('[SSE] Failed to load global count:', err));
+      .catch((err) => {
+        console.warn('[SSE] Failed to load global count:', err);
+        if (!cancelled) {
+          setStreamError(formatClientError(err, 'Unable to load total telemetry count.'));
+        }
+      });
+
+    return () => {
+      cancelled = true;
+    };
   }, [deviceId]);
 
   const connect = useCallback(() => {
@@ -57,11 +78,14 @@ export function useSSEStream({ deviceId, maxBufferLength = 500 }: UseSSEStreamOp
     es.addEventListener('connected', () => {
       console.log(`[SSE] Connected to device ${deviceId} stream`);
       setConnected(true);
+      setStreamError(null);
     });
 
     es.addEventListener('measurement_batch', (event) => {
       try {
         const batch: MeasurementBatchPayload = JSON.parse(event.data);
+        setConnected(true);
+        setStreamError(null);
         setLatestBatch(batch);
         setClockSource(batch.clockSource);
         if (batch.crcVerified !== undefined) {
@@ -98,6 +122,7 @@ export function useSSEStream({ deviceId, maxBufferLength = 500 }: UseSSEStreamOp
         });
       } catch (err) {
         console.error('[SSE] Failed to parse measurement batch:', err);
+        setStreamError('Received malformed telemetry data from the live stream.');
       }
     });
 
@@ -107,6 +132,7 @@ export function useSSEStream({ deviceId, maxBufferLength = 500 }: UseSSEStreamOp
         setLatestStudioConfig(studio);
       } catch (err) {
         console.error('[SSE] Failed to parse studio_config event:', err);
+        setStreamError('Received malformed studio update from the live stream.');
       }
     });
 
@@ -116,6 +142,7 @@ export function useSSEStream({ deviceId, maxBufferLength = 500 }: UseSSEStreamOp
         setLatestZonesConfig(payload);
       } catch (err) {
         console.error('[SSE] Failed to parse zones_config event:', err);
+        setStreamError('Received malformed spatial zone update from the live stream.');
       }
     });
 
@@ -125,16 +152,19 @@ export function useSSEStream({ deviceId, maxBufferLength = 500 }: UseSSEStreamOp
         setLatestDeviceConfig(payload);
       } catch (err) {
         console.error('[SSE] Failed to parse device_config event:', err);
+        setStreamError('Received malformed device configuration update from the live stream.');
       }
     });
 
     es.addEventListener('heartbeat', () => {
       setConnected(true);
+      setStreamError(null);
     });
 
     es.onerror = () => {
       console.warn('[SSE] Connection lost, retrying automatically...');
       setConnected(false);
+      setStreamError('Live telemetry stream disconnected. Reconnecting automatically...');
     };
   }, [deviceId, bufferLimit]);
 
@@ -183,6 +213,8 @@ export function useSSEStream({ deviceId, maxBufferLength = 500 }: UseSSEStreamOp
 
   return {
     connected,
+    streamError,
+    clearStreamError,
     latestBatch,
     latestDirectorState,
     latestStudioConfig,

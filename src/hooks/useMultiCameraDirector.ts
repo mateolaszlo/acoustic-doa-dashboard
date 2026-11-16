@@ -16,6 +16,7 @@ import {
   scoreCameraCandidate,
   stepCameraPan,
 } from '../services/camera_ptz_math';
+import { extractApiErrorMessage, formatClientError } from '../services/error_messages.js';
 
 export interface ActiveSpeakerTarget {
   slotId: number;
@@ -111,6 +112,9 @@ export function useMultiCameraDirector({
   const [liveCamId, setLiveCamId] = useState<string>('cam-front');
   const [activeZoneName, setActiveZoneName] = useState<string>('None');
   const [isLoadingStudio, setIsLoadingStudio] = useState<boolean>(false);
+  const [studioError, setStudioError] = useState<string | null>(null);
+
+  const clearStudioError = useCallback(() => setStudioError(null), []);
 
   // Runtime tracking refs
   const lastSwitchTimeRef = useRef<number>(Date.now());
@@ -149,9 +153,17 @@ export function useMultiCameraDirector({
       credentials: 'include',
       headers,
     })
-      .then((res) => (res.ok ? res.json() : null))
+      .then(async (res) => {
+        if (!res.ok) {
+          const msg = await extractApiErrorMessage(res, 'Failed to load studio configuration.');
+          if (!isCancelled) setStudioError(msg);
+          return null;
+        }
+        return res.json();
+      })
       .then((data: StudioConfigPayload | null) => {
         if (isCancelled || !data) return;
+        setStudioError(null);
 
         if (data.roomLayout) {
           setRoomLayout(data.roomLayout);
@@ -292,14 +304,21 @@ export function useMultiCameraDirector({
           if (token) {
             headers['Authorization'] = `Bearer ${token}`;
           }
-          await fetch(`/api/v1/devices/${deviceId}/studio`, {
+          const res = await fetch(`/api/v1/devices/${deviceId}/studio`, {
             method: 'PUT',
             credentials: 'include',
             headers,
             body: JSON.stringify(payload),
           });
+          if (!res.ok) {
+            const msg = await extractApiErrorMessage(res, 'Failed to save studio changes.');
+            setStudioError(msg);
+            return;
+          }
+          setStudioError(null);
         } catch (err) {
           console.warn('[Director] Failed to sync studio configuration with backend:', err);
+          setStudioError(formatClientError(err, 'Failed to save studio changes to the server.'));
         }
       };
 
@@ -578,6 +597,8 @@ export function useMultiCameraDirector({
     directorConfig,
     activeZoneName,
     isLoadingStudio,
+    studioError,
+    clearStudioError,
     processDirectorFrame,
     setManualLiveCamera,
     setCameraCount,
