@@ -155,12 +155,6 @@ export const AuthModal: React.FC<AuthModalProps> = ({ isOpen, onClose }) => {
             </div>
           </div>
 
-          {tab === 'login' && (
-            <div className="p-2.5 bg-slate-950/60 border border-slate-800/80 rounded-lg text-[11px] text-slate-400">
-              <span className="font-semibold text-slate-300">Default Admin:</span> <code>admin</code> / <code>admin123</code>
-            </div>
-          )}
-
           <button
             type="submit"
             disabled={loading}
