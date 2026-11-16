@@ -59,6 +59,14 @@ describe('extractApiErrorMessage', () => {
     );
   });
 
+  it('treats empty-body HTTP 500 from Vite proxy ECONNREFUSED as backend unreachable', async () => {
+    const proxy500 = new Response('', { status: 500 });
+
+    await expect(extractApiErrorMessage(proxy500)).resolves.toBe(
+      'Cannot reach the backend server right now. Check that the API server is running and VITE_BACKEND_HTTPS_URL matches its port.'
+    );
+  });
+
   it('returns concise plain-text error messages when response is short non-HTML text', async () => {
     const res = new Response('Duplicate API key for node', {
       status: 409,

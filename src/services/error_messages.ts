@@ -59,9 +59,12 @@ export async function extractApiErrorMessage(
   res: Response,
   fallback = 'Request failed.'
 ): Promise<string> {
+  let hasEmptyBody = false;
+
   try {
     const rawText = await res.text();
     const trimmed = rawText.trim();
+    hasEmptyBody = trimmed.length === 0;
 
     if (trimmed) {
       try {
@@ -90,6 +93,11 @@ export async function extractApiErrorMessage(
     }
   } catch {
     // Ignore body stream read failures and fall through to HTTP status mapping.
+  }
+
+  // Vite dev proxy returns HTTP 500 with an empty body on ECONNREFUSED
+  if (res.status === 500 && hasEmptyBody) {
+    return 'Cannot reach the backend server right now. Check that the API server is running and VITE_BACKEND_HTTPS_URL matches its port.';
   }
 
   return friendlyStatusFallback(res.status, fallback);
