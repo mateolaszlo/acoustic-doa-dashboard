@@ -1,92 +1,55 @@
-# Acoustic DOA Web Dashboard & Visualizer (Client 2)
+# Acoustic DOA Dashboard
 
-A real-time, browser-based 360° polar radar visualizer, telemetry monitor, and remote calibration controller for **ESP32 Acoustic Direction of Arrival (DOA)** arrays.
+React + TypeScript web interface for monitoring 360° Direction-of-Arrival (DOA) telemetry, configuring room layouts and virtual PTZ cameras, and managing hardware nodes.
 
----
+## Requirements
 
-## 🌟 Key Features
+- Node.js 20+ and npm 10+
+- Running `acoustic-doa-backend` instance
 
-- **Dual Operating Modes (`MEETING` Studio Director vs `DSP` Acoustic Radar):**
-  - **Meeting Studio Director Mode:** Interactive architectural floorplan (`SmartRoomDirectorCanvas`) displaying active & coasting speaker bearings, camera fields of view (`cam-front`, `cam-rear`, `cam-side`), active-speaker cards, and a real-time multi-speaker diarization timeline (`DiarizationTimeline`).
-  - **1–3 Camera Rig & Authoritative PTZ Sync:** Supports configurable `1-CAMERA`, `2-CAMERAS`, and `3-CAMERAS` studio rigs (`CameraStudioConfigModal`) with sticky lock during brief pauses/coasting, zone-aware priority cuts, and bidirectional synchronization via `GET/PUT /api/v1/devices/:id/studio` and live `studio_config` SSE updates.
-  - **Interactive Room Furniture & Navigation:** Supports `oval`, `round`, `ushape`, and `hollow_square` tables, adjustable dimensions and seat counts, draggable individual custom chairs (with one-click Auto-Arrange reset to server `customChairs: null`), spatial geofence overlays, seamless infinite grid pan/zoom, and resizable canvas height.
-  - **High-DPI 360° Polar Radar Scope (DSP Mode):**
-    - Real-time 60 FPS Canvas rendering matching the physical acoustic array coordinate system ($0^\circ$ Front/North, $+90^\circ$ Right/East, $\pm 180^\circ$ Back/South, $-90^\circ$ Left/West).
-    - Multi-source simultaneous CLEAN beam visualization, radial tick markings, analog phosphor persistence trails, dB SPL color coding, and confidence-scaled needles.
-    - Integrated multipath / reverberation diagnostics card (`MultipathAnalyzerCard`).
-- **Spatial Room Geofencing (`SpatialZoneEditorModal`):**
-  - Define named acoustic sectors (`Podium`, `Main Table`, `Priority`, `Ignore`, `Mute`, `Zone`), including circular wrap-around sectors crossing $\pm 180^\circ$, persisted server-side via `PUT /api/v1/devices/:id/zones`.
-- **Hardware Node & API Key Management Panel (Admin):**
-  - Dedicated administrative dashboard to provision new physical ESP32 arrays, securely reveal and copy API keys, rotate keys with instant backend invalidation, rename nodes, and decommission hardware.
-  - 2-step safe historical data purge action to reclaim database storage without resetting device calibration or interrupting active live telemetry streams.
-- **Authenticated Landing Gateway & RBAC:**
-  - Dedicated Sign In / Register landing page ([LandingLoginPage.tsx](src/components/auth/LandingLoginPage.tsx)) backed by `HttpOnly` cookie sessions (`credentials: 'include'`, zero tokens stored in `localStorage`).
-  - No default role or unauthenticated telemetry access: `viewer` logins monitor read-only (pan/zoom only), while `admin` logins manage studio layout, cameras, zones, DSP calibration, nodes, and users ([UserManagementPanel.tsx](src/components/admin/UserManagementPanel.tsx)).
-- **Pure HTTPS REST-API & Server-Sent Events (SSE):**
-  - Native browser `EventSource(..., { withCredentials: true })` connection to `GET /api/v1/devices/:id/stream` receiving `measurement_batch`, `studio_config`, `zones_config`, and `device_config` live updates mirrored across all connected windows.
-- **Remote Device Calibration & Zero-Angle Wizard (Admin):**
-  - Modify microphone array geometry ($d$ in mm), rotational zero-angle trim ($\phi_{\text{offset}}$), trigger SPL thresholds, GCC-PHAT correlation cutoffs, adaptive noise tracking, sector transition widths/hysteresis, tracker hold timeouts, and audio sample rates (44.1 kHz vs 48 kHz), plus 1-click boresight Zero-Angle calibration.
-- **Acoustic Heatmap & Event Log:**
-  - 36-bin angular rose diagram (`15m`, `1h`, `24h`, `7d`) and searchable/confidence-filterable event table with CSV export.
+## Quick Start
 
----
-
-## 🚀 Quick Start
-
-### 1. Requirements
-- Node.js 20.x or higher
-- npm 10.x or higher
-- Running `acoustic-doa-backend` server on port 3000 / 3443
-
-### 2. Installation & Environment
 ```bash
 npm install
-cp .env.example .env   # Required for npm run dev: set VITE_BACKEND_HTTPS_URL (e.g. https://localhost:3443 or 8443)
-```
-
-### 3. Run Development Server
-```bash
+cp .env.example .env
 npm run dev
 ```
 
-Open `https://localhost:5173` in your browser (Vite auto-generates local SAN certificates in `certs/` on first start, or keep HTTP by setting `VITE_ENABLE_HTTPS=false`). Vite fails fast on `npm run dev` if `.env` is missing `VITE_BACKEND_HTTPS_URL`, and otherwise forwards `/api` requests over HTTPS to the separate backend gateway.
+Make sure `VITE_BACKEND_HTTPS_URL` in `.env` matches your backend's HTTPS port (for example `https://localhost:3443` or `https://localhost:8443`).
 
-### 4. Run Unit Tests
-```bash
-npm test
-```
+When running `npm run dev`:
+- The dashboard opens at **`https://localhost:5173`** (set `VITE_ENABLE_HTTPS=false` in `.env` if you prefer HTTP).
+- Missing local TLS certificates in `certs/` are generated automatically on startup via `certs/ensure_certs.mjs`.
+- Requests to `/api/*` are proxied directly to `VITE_BACKEND_HTTPS_URL`.
 
-### 5. Build for Production
-```bash
-npm run build
-```
+## Scripts
 
----
+| Command | Purpose |
+|---|---|
+| `npm run dev` | Start Vite dev server on port `5173` |
+| `npm run build` | Type-check (`tsc`) and build production bundle to `dist/` |
+| `npm run preview` | Preview the production `dist/` build locally |
+| `npm run certs:generate` | Manually generate local SAN TLS certificates in `certs/` |
+| `npm test` | Run Vitest unit tests (`vitest run`) |
 
-## 🏗️ Architecture & Communication Flow
+## Features & Access Roles
 
-```
-+-----------------------------------------------------------+
-|               ESP32 Edge Node (Client 1)                  |
-|   4-Mic INMP441 Array -> GCC-PHAT DSP -> REST Client     |
-+-----------------------------------------------------------+
-                              |
-       POST /measurements (Binary batch, 5 Hz)
-       GET /calibration (Every 60s)
-                              v
-+-----------------------------------------------------------+
-|              acoustic-doa-backend (Server)                |
-|   Binary Decoder -> MTT + PTZ Director -> SQLite -> SSE   |
-+-----------------------------------------------------------+
-                              |
-       GET /devices/1/stream (SSE: telemetry + studio_config)
-       GET & PUT /devices/1/studio (Layout & 1-3 cameras)
-       GET & PUT /devices/1/zones (Spatial geofences)
-       GET & PUT /devices/1/config (Calibration)
-       GET /devices/1/stats (Acoustic heatmaps)
-                              v
-+-----------------------------------------------------------+
-|         acoustic-doa-dashboard (Client 2 - React)         |
-|   Studio Director & 60 FPS Radar -> Remote Config         |
-+-----------------------------------------------------------+
+Authentication is required before viewing telemetry or streams (`HttpOnly` cookie session, no anonymous access):
+
+- **Viewer:** Monitors the Smart Meeting Director canvas (pan/zoom), active speaker cards, diarization timeline, acoustic heatmaps, and live telemetry logs read-only.
+- **Admin:** All viewer capabilities plus room layout/table/chair editing, 1–3 PTZ camera studio tuning, spatial geofence editing, DSP calibration & zero-angle trim, hardware node/API key management, and user role administration.
+
+## Project Structure
+
+```text
+acoustic-doa-dashboard/
+├── src/
+│   ├── components/   # Radar, meeting director, calibration, analytics, auth, admin, layout
+│   ├── context/      # AuthContext (HttpOnly session state)
+│   ├── hooks/        # SSE stream, device config, spatial zones, diarization, PTZ director
+│   ├── services/     # API client, error formatting, radar/PTZ math, multipath analyzer
+│   └── types/        # Shared TypeScript API types
+├── certs/            # Auto & manual SAN TLS certificate generation scripts
+├── test/             # Vitest unit tests
+└── vite.config.ts    # Dev/preview HTTPS setup and /api proxy configuration
 ```
