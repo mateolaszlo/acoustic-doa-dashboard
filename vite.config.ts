@@ -3,7 +3,12 @@ import react from '@vitejs/plugin-react';
 
 export default defineConfig(({ mode }) => {
   const env = loadEnv(mode, process.cwd(), '');
-  const backendTarget = env.VITE_BACKEND_HTTP_URL || process.env.VITE_BACKEND_HTTP_URL || 'http://localhost:3000';
+  const backendTarget =
+    env.VITE_BACKEND_HTTPS_URL ||
+    process.env.VITE_BACKEND_HTTPS_URL ||
+    env.VITE_BACKEND_HTTP_URL ||
+    process.env.VITE_BACKEND_HTTP_URL ||
+    'https://localhost:3443';
 
   return {
     plugins: [react()],
@@ -13,6 +18,7 @@ export default defineConfig(({ mode }) => {
         '/api': {
           target: backendTarget,
           changeOrigin: true,
+          secure: false,
         },
       },
     },

@@ -42,21 +42,23 @@ A real-time, browser-based 360° polar radar visualizer, telemetry monitor, and 
 npm install
 ```
 
-### 3. Run Development Server
+### 3. Run in Production HTTPS Mode (Recommended for Demo)
+Build the static bundle and open the dashboard directly from the backend's HTTPS gateway (`https://localhost:3443/`):
+```bash
+npm run build
+```
+Then with `acoustic-doa-backend` running, open `https://localhost:3443/` — REST calls and SSE streams run over the same HTTPS origin.
+
+### 4. Run Vite Development Server (Optional)
 ```bash
 npm run dev
 ```
 
-Open `http://localhost:5173` in your browser. The Vite proxy forwards `/api` requests to the local backend.
+Open `http://localhost:5173` in your browser. The Vite proxy forwards `/api` requests to the backend HTTPS gateway (`https://localhost:3443`, overridable via `VITE_BACKEND_HTTPS_URL`).
 
-### 4. Run Unit Tests
+### 5. Run Unit Tests
 ```bash
 npm test
-```
-
-### 5. Build for Production
-```bash
-npm run build
 ```
 
 ---
