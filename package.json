@@ -7,7 +7,8 @@
     "dev": "vite",
     "build": "tsc && vite build",
     "preview": "vite preview",
-    "test": "vitest run"
+    "test": "vitest run",
+    "certs:generate": "node certs/ensure_certs.mjs"
   },
   "dependencies": {
     "lucide-react": "^0.475.0",

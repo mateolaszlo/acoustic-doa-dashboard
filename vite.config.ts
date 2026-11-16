@@ -2,36 +2,46 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { defineConfig, loadEnv } from 'vite';
 import react from '@vitejs/plugin-react';
+import { ensureTlsCertificates } from './certs/ensure_certs.mjs';
 
 function resolveHttpsOptions(
   env: Record<string, string>,
-  shouldValidate: boolean
+  shouldServeHttps: boolean
 ): { key: Buffer; cert: Buffer } | undefined {
+  if (!shouldServeHttps) {
+    return undefined;
+  }
+
   const enableRaw = (env.VITE_ENABLE_HTTPS || process.env.VITE_ENABLE_HTTPS || '').trim().toLowerCase();
-  if (enableRaw !== 'true') {
+  if (enableRaw === 'false' || enableRaw === '0') {
     return undefined;
   }
 
   const keyPathRaw =
     env.VITE_SSL_KEY_PATH ||
     process.env.VITE_SSL_KEY_PATH ||
-    '../acoustic-doa-backend/certs/server.key';
+    './certs/server.key';
   const certPathRaw =
     env.VITE_SSL_CERT_PATH ||
     process.env.VITE_SSL_CERT_PATH ||
-    '../acoustic-doa-backend/certs/server.cert';
+    './certs/server.cert';
 
   const keyPath = path.resolve(process.cwd(), keyPathRaw);
   const certPath = path.resolve(process.cwd(), certPathRaw);
 
-  if (shouldValidate && (!fs.existsSync(keyPath) || !fs.existsSync(certPath))) {
-    throw new Error(
-      `[FATAL] VITE_ENABLE_HTTPS=true but TLS certificate files were not found (key: ${keyPath}, cert: ${certPath}). Generate certs in acoustic-doa-backend (certs/generate_certs.sh) or set VITE_ENABLE_HTTPS=false in acoustic-doa-dashboard/.env`
-    );
-  }
-
   if (!fs.existsSync(keyPath) || !fs.existsSync(certPath)) {
-    return undefined;
+    try {
+      ensureTlsCertificates({ keyPath, certPath });
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : String(err);
+      if (enableRaw === 'true') {
+        throw new Error(
+          `[FATAL] VITE_ENABLE_HTTPS=true but TLS certificate setup failed: ${msg}`
+        );
+      }
+      console.warn(`[HTTPS] Notice: Could not auto-generate TLS certificates (${msg}); continuing in HTTP mode.`);
+      return undefined;
+    }
   }
 
   return {
