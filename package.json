@@ -2,6 +2,7 @@
   "name": "acoustic-doa-dashboard",
   "version": "1.0.0",
   "type": "module",
+  "license": "UNLICENSED",
   "description": "Real-time acoustic radar visualizer, telemetry dashboard, and remote calibration controller for ESP32 DOA arrays",
   "scripts": {
     "dev": "vite",

@@ -9,7 +9,7 @@ A real-time, browser-based 360° polar radar visualizer, telemetry monitor, and 
 - **Dual Operating Modes (`MEETING` Studio Director vs `DSP` Acoustic Radar):**
   - **Meeting Studio Director Mode:** Interactive architectural floorplan (`SmartRoomDirectorCanvas`) displaying active & coasting speaker bearings, camera fields of view (`cam-front`, `cam-rear`, `cam-side`), active-speaker cards, and a real-time multi-speaker diarization timeline (`DiarizationTimeline`).
   - **1–3 Camera Rig & Authoritative PTZ Sync:** Supports configurable `1-CAMERA`, `2-CAMERAS`, and `3-CAMERAS` studio rigs (`CameraStudioConfigModal`) with sticky lock during brief pauses/coasting, zone-aware priority cuts, and bidirectional synchronization via `GET/PUT /api/v1/devices/:id/studio` and live `studio_config` SSE updates.
-  - **Interactive Room Furniture & Navigation:** Supports `oval`, `round`, and `ushape` tables, adjustable dimensions and seat counts, draggable individual custom chairs (with one-click Auto-Arrange reset to server `customChairs: null`), spatial geofence overlays, seamless infinite grid pan/zoom, and resizable canvas height.
+  - **Interactive Room Furniture & Navigation:** Supports `oval`, `round`, `ushape`, and `hollow_square` tables, adjustable dimensions and seat counts, draggable individual custom chairs (with one-click Auto-Arrange reset to server `customChairs: null`), spatial geofence overlays, seamless infinite grid pan/zoom, and resizable canvas height.
   - **High-DPI 360° Polar Radar Scope (DSP Mode):**
     - Real-time 60 FPS Canvas rendering matching the physical acoustic array coordinate system ($0^\circ$ Front/North, $+90^\circ$ Right/East, $\pm 180^\circ$ Back/South, $-90^\circ$ Left/West).
     - Multi-source simultaneous CLEAN beam visualization, radial tick markings, analog phosphor persistence trails, dB SPL color coding, and confidence-scaled needles.
@@ -20,14 +20,14 @@ A real-time, browser-based 360° polar radar visualizer, telemetry monitor, and 
   - Dedicated administrative dashboard to provision new physical ESP32 arrays, securely reveal and copy API keys, rotate keys with instant backend invalidation, rename nodes, and decommission hardware.
   - 2-step safe historical data purge action to reclaim database storage without resetting device calibration or interrupting active live telemetry streams.
 - **Authenticated Landing Gateway & RBAC:**
-  - Dedicated Sign In / Register landing page ([LandingLoginPage.tsx](file:///home/ubuntu/developer/seminar/acoustic-doa-dashboard/src/components/auth/LandingLoginPage.tsx)) backed by `HttpOnly` cookie sessions (`credentials: 'include'`, zero tokens stored in `localStorage`).
-  - No default role or unauthenticated telemetry access: `viewer` logins monitor read-only (pan/zoom only), while `admin` logins manage studio layout, cameras, zones, DSP calibration, nodes, and users ([UserManagementPanel.tsx](file:///home/ubuntu/developer/seminar/acoustic-doa-dashboard/src/components/admin/UserManagementPanel.tsx)).
+  - Dedicated Sign In / Register landing page ([LandingLoginPage.tsx](src/components/auth/LandingLoginPage.tsx)) backed by `HttpOnly` cookie sessions (`credentials: 'include'`, zero tokens stored in `localStorage`).
+  - No default role or unauthenticated telemetry access: `viewer` logins monitor read-only (pan/zoom only), while `admin` logins manage studio layout, cameras, zones, DSP calibration, nodes, and users ([UserManagementPanel.tsx](src/components/admin/UserManagementPanel.tsx)).
 - **Pure HTTPS REST-API & Server-Sent Events (SSE):**
   - Native browser `EventSource(..., { withCredentials: true })` connection to `GET /api/v1/devices/:id/stream` receiving `measurement_batch`, `studio_config`, `zones_config`, and `device_config` live updates mirrored across all connected windows.
 - **Remote Device Calibration & Zero-Angle Wizard (Admin):**
   - Modify microphone array geometry ($d$ in mm), rotational zero-angle trim ($\phi_{\text{offset}}$), trigger SPL thresholds, GCC-PHAT correlation cutoffs, adaptive noise tracking, sector transition widths/hysteresis, tracker hold timeouts, and audio sample rates (44.1 kHz vs 48 kHz), plus 1-click boresight Zero-Angle calibration.
 - **Acoustic Heatmap & Event Log:**
-  - 36-bin angular rose diagram (`15m`, `1h`, `24h`) and searchable/confidence-filterable event table with CSV export.
+  - 36-bin angular rose diagram (`15m`, `1h`, `24h`, `7d`) and searchable/confidence-filterable event table with CSV export.
 
 ---
 
