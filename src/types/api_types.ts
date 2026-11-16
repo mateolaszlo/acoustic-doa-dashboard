@@ -250,6 +250,16 @@ export interface StudioConfigPayload {
   updatedAt?: string;
 }
 
+export interface ZonesConfigSsePayload {
+  deviceId: number;
+  zones: SpatialZone[];
+}
+
+export interface DeviceConfigSsePayload {
+  deviceId: number;
+  calibration: DeviceCalibration;
+}
+
 
 
 

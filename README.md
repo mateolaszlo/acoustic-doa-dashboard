@@ -19,10 +19,11 @@ A real-time, browser-based 360° polar radar visualizer, telemetry monitor, and 
 - **Hardware Node & API Key Management Panel (Admin):**
   - Dedicated administrative dashboard to provision new physical ESP32 arrays, securely reveal and copy API keys, rotate keys with instant backend invalidation, rename nodes, and decommission hardware.
   - 2-step safe historical data purge action to reclaim database storage without resetting device calibration or interrupting active live telemetry streams.
-- **Role-Based Access Control (RBAC):**
-  - JWT login/registration modal (`admin` / `viewer`) and admin User Management panel (`UserManagementPanel`).
+- **Authenticated Landing Gateway & RBAC:**
+  - Dedicated Sign In / Register landing page ([LandingLoginPage.tsx](file:///home/ubuntu/developer/seminar/acoustic-doa-dashboard/src/components/auth/LandingLoginPage.tsx)) backed by `HttpOnly` cookie sessions (`credentials: 'include'`, zero tokens stored in `localStorage`).
+  - No default role or unauthenticated telemetry access: `viewer` logins monitor read-only (pan/zoom only), while `admin` logins manage studio layout, cameras, zones, DSP calibration, nodes, and users ([UserManagementPanel.tsx](file:///home/ubuntu/developer/seminar/acoustic-doa-dashboard/src/components/admin/UserManagementPanel.tsx)).
 - **Pure HTTPS REST-API & Server-Sent Events (SSE):**
-  - Native browser `EventSource` connection to `GET /api/v1/devices/:id/stream` receiving `measurement_batch` (normalized frames, active MTT tracks, authoritative director telemetry) and `studio_config` live updates.
+  - Native browser `EventSource(..., { withCredentials: true })` connection to `GET /api/v1/devices/:id/stream` receiving `measurement_batch`, `studio_config`, `zones_config`, and `device_config` live updates mirrored across all connected windows.
 - **Remote Device Calibration & Zero-Angle Wizard (Admin):**
   - Modify microphone array geometry ($d$ in mm), rotational zero-angle trim ($\phi_{\text{offset}}$), trigger SPL thresholds, GCC-PHAT correlation cutoffs, adaptive noise tracking, sector transition widths/hysteresis, tracker hold timeouts, and audio sample rates (44.1 kHz vs 48 kHz), plus 1-click boresight Zero-Angle calibration.
 - **Acoustic Heatmap & Event Log:**

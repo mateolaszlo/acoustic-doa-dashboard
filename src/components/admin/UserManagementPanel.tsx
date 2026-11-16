@@ -4,20 +4,23 @@ import { UserRecord, UserRole } from '../../types/api_types.js';
 import { Users, Shield, User, Trash2, RefreshCw, AlertCircle, CheckCircle2 } from 'lucide-react';
 
 export const UserManagementPanel: React.FC = () => {
-  const { token, user: currentUser } = useAuth();
+  const { token, isAdmin, user: currentUser } = useAuth();
   const [users, setUsers] = useState<UserRecord[]>([]);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [successMsg, setSuccessMsg] = useState<string | null>(null);
 
   const fetchUsers = useCallback(async () => {
-    if (!token) return;
+    if (!isAdmin) return;
     setLoading(true);
     setError(null);
 
     try {
+      const headers: Record<string, string> = {};
+      if (token) headers['Authorization'] = `Bearer ${token}`;
       const res = await fetch('/api/v1/users', {
-        headers: { Authorization: `Bearer ${token}` },
+        credentials: 'include',
+        headers,
       });
 
       if (!res.ok) {
@@ -31,7 +34,7 @@ export const UserManagementPanel: React.FC = () => {
     } finally {
       setLoading(false);
     }
-  }, [token]);
+  }, [isAdmin, token]);
 
   useEffect(() => {
     fetchUsers();
@@ -42,12 +45,12 @@ export const UserManagementPanel: React.FC = () => {
     setSuccessMsg(null);
 
     try {
+      const headers: Record<string, string> = { 'Content-Type': 'application/json' };
+      if (token) headers['Authorization'] = `Bearer ${token}`;
       const res = await fetch(`/api/v1/users/${userId}/role`, {
         method: 'PATCH',
-        headers: {
-          'Content-Type': 'application/json',
-          Authorization: `Bearer ${token}`,
-        },
+        credentials: 'include',
+        headers,
         body: JSON.stringify({ role: newRole }),
       });
 
@@ -73,9 +76,12 @@ export const UserManagementPanel: React.FC = () => {
     setSuccessMsg(null);
 
     try {
+      const headers: Record<string, string> = {};
+      if (token) headers['Authorization'] = `Bearer ${token}`;
       const res = await fetch(`/api/v1/users/${userId}`, {
         method: 'DELETE',
-        headers: { Authorization: `Bearer ${token}` },
+        credentials: 'include',
+        headers,
       });
 
       const data = await res.json();

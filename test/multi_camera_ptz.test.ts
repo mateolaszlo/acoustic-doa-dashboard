@@ -12,6 +12,7 @@ import {
   computeDefaultChairs,
 } from '../src/services/camera_ptz_math.js';
 import { VirtualCamera, RoomLayoutConfig, SpatialZone, CustomChair } from '../src/types/api_types.js';
+import { mergeDirectorAnimationFrame } from '../src/hooks/useMultiCameraDirector.js';
 
 describe('Multi-Camera Studio & Trigonometric Parallax Geometry', () => {
   const arrayX = 400;
@@ -436,5 +437,26 @@ describe('Multi-Camera Studio & Trigonometric Parallax Geometry', () => {
 
     // Rear camera (facing North) has frontal view of presenter
     expect(scoreRear).toBeGreaterThan(scoreFront);
+  });
+
+  it('preserves dragged xRatio/yRatio and avoids stale overwrites during mergeDirectorAnimationFrame', () => {
+    const draggedPrev: VirtualCamera[] = DEFAULT_VIRTUAL_CAMERAS.map((c) =>
+      c.id === 'cam-front' ? { ...c, xRatio: 0.72, yRatio: 0.24 } : { ...c }
+    );
+    // Stale frame still has old resting coordinates (0.5, 0.08) but updated slew pan angle (145°)
+    const staleAnim: VirtualCamera[] = DEFAULT_VIRTUAL_CAMERAS.map((c) =>
+      c.id === 'cam-front' ? { ...c, xRatio: 0.5, yRatio: 0.08, currentPanDeg: 145, isLive: true } : { ...c }
+    );
+
+    const merged = mergeDirectorAnimationFrame(draggedPrev, staleAnim, true);
+    const mergedFront = merged.find((c) => c.id === 'cam-front')!;
+    expect(mergedFront.xRatio).toBe(0.72);
+    expect(mergedFront.yRatio).toBe(0.24);
+    expect(mergedFront.currentPanDeg).toBe(145);
+    expect(mergedFront.isLive).toBe(true);
+
+    // Identical follow-up frame returns exact same array reference (no 60fps React thrash)
+    const noopMerged = mergeDirectorAnimationFrame(merged, staleAnim, true);
+    expect(noopMerged).toBe(merged);
   });
 });

@@ -8,6 +8,7 @@ import { EventLogTable } from './components/analytics/EventLogTable.js';
 import { UserManagementPanel } from './components/admin/UserManagementPanel.js';
 import { NodeManagementPanel } from './components/admin/NodeManagementPanel.js';
 import { AuthModal } from './components/auth/AuthModal.js';
+import { LandingLoginPage } from './components/auth/LandingLoginPage.js';
 import { SmartRoomDirectorCanvas } from './components/conference/SmartRoomDirectorCanvas.js';
 import { ActiveSpeakerCards } from './components/conference/ActiveSpeakerCards.js';
 import { DiarizationTimeline } from './components/conference/DiarizationTimeline.js';
@@ -22,11 +23,11 @@ import { useMultiCameraDirector } from './hooks/useMultiCameraDirector.js';
 import { useAuth } from './context/AuthContext.js';
 import { playSonarPing } from './services/audio_chime.js';
 import { DashboardMode } from './types/api_types.js';
-import { Sliders, PieChart, ListFilter, Users, Cpu, MapPin } from 'lucide-react';
+import { Sliders, PieChart, ListFilter, Users, Cpu, MapPin, Radar } from 'lucide-react';
 
 type TabType = 'calibration' | 'analytics' | 'logs' | 'users' | 'nodes';
 
-export function App() {
+function AuthenticatedDashboard() {
   const [mode, setMode] = useState<DashboardMode>('MEETING');
   const [deviceId, setDeviceId] = useState(1);
   const [isAudioEnabled, setIsAudioEnabled] = useState(false);
@@ -36,7 +37,7 @@ export function App() {
   const [isStudioModalOpen, setIsStudioModalOpen] = useState(false);
   const [activeTab, setActiveTab] = useState<TabType>('analytics');
 
-  // Real-time Server-Sent Events stream from backend
+  // Real-time Server-Sent Events stream from backend (only connects when authenticated)
   const {
     connected,
     recentEvents,
@@ -44,6 +45,8 @@ export function App() {
     latestBatch,
     latestDirectorState,
     latestStudioConfig,
+    latestZonesConfig,
+    latestDeviceConfig,
     bufferLimit,
     setBufferLimit,
     clockSource,
@@ -65,10 +68,10 @@ export function App() {
     successMsg,
     updateConfig,
     calibrateZeroAngle,
-  } = useDeviceConfig(deviceId, token);
+  } = useDeviceConfig(deviceId, token, latestDeviceConfig);
 
   // Spatial zones & acoustic geofences
-  const { zones, saveZones } = useSpatialZones(deviceId, token);
+  const { zones, saveZones } = useSpatialZones(deviceId, token, latestZonesConfig);
 
   const primaryEvent = recentEvents[0];
 
@@ -96,6 +99,7 @@ export function App() {
     updateConfig: updateDirectorConfig,
     updateRoomLayout: handleUpdateRoomLayout,
     resetToDefaults: resetDirectorDefaults,
+    setDraggingStudio,
   } = useMultiCameraDirector({
     deviceId,
     token,
@@ -181,6 +185,8 @@ export function App() {
               onProcessFrame={processDirectorFrame}
               onSelectManualLiveCam={setManualLiveCamera}
               onOpenStudioSettings={() => setIsStudioModalOpen(true)}
+              onDragStateChange={setDraggingStudio}
+              canEdit={isAdmin}
             />
 
             {/* Active Speaker Diarization Cards & Balance Monitor */}
@@ -447,6 +453,25 @@ export function App() {
       <AuthModal isOpen={isAuthModalOpen} onClose={() => setIsAuthModalOpen(false)} />
     </div>
   );
+}
+
+export function App() {
+  const { isAuthenticated, loading } = useAuth();
+
+  if (loading) {
+    return (
+      <div className="min-h-screen bg-slate-950 text-slate-300 flex flex-col items-center justify-center gap-3 font-mono text-xs">
+        <Radar className="w-8 h-8 text-emerald-400 animate-spin" />
+        <span>Verifying authenticated session...</span>
+      </div>
+    );
+  }
+
+  if (!isAuthenticated) {
+    return <LandingLoginPage />;
+  }
+
+  return <AuthenticatedDashboard />;
 }
 
 export default App;

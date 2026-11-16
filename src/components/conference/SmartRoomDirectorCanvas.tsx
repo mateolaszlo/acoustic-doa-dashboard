@@ -54,6 +54,8 @@ interface SmartRoomDirectorCanvasProps {
   onSelectManualLiveCam: (camId: string) => void;
   onOpenStudioSettings: () => void;
   onSetCameraCount?: (count: number) => void;
+  onDragStateChange?: (isDragging: boolean) => void;
+  canEdit?: boolean;
 }
 
 function drawChair(
@@ -95,6 +97,8 @@ export const SmartRoomDirectorCanvas: React.FC<SmartRoomDirectorCanvasProps> = (
   onSelectManualLiveCam,
   onOpenStudioSettings,
   onSetCameraCount,
+  onDragStateChange,
+  canEdit = true,
 }) => {
   const canvasRef = useRef<HTMLCanvasElement | null>(null);
   const lastTimeRef = useRef<number>(performance.now());
@@ -255,72 +259,95 @@ export const SmartRoomDirectorCanvas: React.FC<SmartRoomDirectorCanvasProps> = (
   const onProcessFrameRef = useRef(onProcessFrame);
   onProcessFrameRef.current = onProcessFrame;
 
-  // Mouse interaction handlers for direct camera drag-and-drop, chair repositioning & table resizing
-  const handleMouseDown = useCallback((e: React.MouseEvent<HTMLCanvasElement>) => {
-    const canvas = canvasRef.current;
-    if (!canvas) return;
-    const rect = canvas.getBoundingClientRect();
-    const mouseX = e.clientX - rect.left;
-    const mouseY = e.clientY - rect.top;
+  // Pointer interaction handlers with Pointer Capture for smooth camera/chair drag, table resizing & map panning
+  const handlePointerDown = useCallback(
+    (e: React.PointerEvent<HTMLCanvasElement>) => {
+      if (e.button !== 0) return;
+      const canvas = canvasRef.current;
+      if (!canvas) return;
+      e.preventDefault();
 
-    // Inverse Zoom & Pan Transformation: convert viewport client mouse pos to room world pos
-    const centerX = rect.width / 2;
-    const centerY = rect.height / 2 + 10;
-    const zoom = zoomLevelRef.current;
-    const pan = panOffsetRef.current;
-    const worldX = centerX + (mouseX - centerX - pan.x) / zoom;
-    const worldY = centerY + (mouseY - centerY - pan.y) / zoom;
+      const rect = canvas.getBoundingClientRect();
+      const mouseX = e.clientX - rect.left;
+      const mouseY = e.clientY - rect.top;
 
-    // 1. Check camera drag
-    for (const cam of camerasRef.current) {
-      const camX = centerX + (cam.xRatio - 0.5) * BASE_ROOM_WIDTH;
-      const camY = centerY + cam.yRatio * BASE_ROOM_HEIGHT - BASE_ROOM_CENTER_Y;
-      if (Math.hypot(worldX - camX, worldY - camY) < 22) {
-        draggingCamIdRef.current = cam.id;
-        return;
-      }
-    }
+      // Inverse Zoom & Pan Transformation: convert viewport client mouse pos to room world pos
+      const centerX = rect.width / 2;
+      const centerY = rect.height / 2 + 10;
+      const zoom = zoomLevelRef.current;
+      const pan = panOffsetRef.current;
+      const worldX = centerX + (mouseX - centerX - pan.x) / zoom;
+      const worldY = centerY + (mouseY - centerY - pan.y) / zoom;
 
-    // 2. Check chair drag
-    const layout = roomLayoutRef.current;
-    const totalSeats = Math.max(2, layout.seatCount || 8);
-    const activeChairs = (layout.customChairs && layout.customChairs.length === totalSeats)
-      ? layout.customChairs
-      : computeDefaultChairs(layout, BASE_ROOM_WIDTH, BASE_ROOM_HEIGHT);
+      const capturePointer = () => {
+        try {
+          canvas.setPointerCapture(e.pointerId);
+        } catch {}
+      };
 
-    for (const chair of activeChairs) {
-      const cx = centerX + (chair.xRatio - 0.5) * BASE_ROOM_WIDTH;
-      const cy = centerY + chair.yRatio * BASE_ROOM_HEIGHT - BASE_ROOM_CENTER_Y;
-      if (Math.hypot(worldX - cx, worldY - cy) < 16) {
-        draggingChairIdRef.current = chair.id;
-        if (!layout.customChairs || layout.customChairs.length !== totalSeats) {
-          onUpdateRoomLayout({ customChairs: activeChairs });
+      if (canEdit) {
+        // 1. Check camera drag (generous hit radius in screen/world coords)
+        const camHitRadius = Math.max(26, 26 / zoom);
+        for (const cam of camerasRef.current) {
+          const camX = centerX + (cam.xRatio - 0.5) * BASE_ROOM_WIDTH;
+          const camY = centerY + cam.yRatio * BASE_ROOM_HEIGHT - BASE_ROOM_CENTER_Y;
+          if (Math.hypot(worldX - camX, worldY - camY) <= camHitRadius) {
+            draggingCamIdRef.current = cam.id;
+            onDragStateChange?.(true);
+            capturePointer();
+            return;
+          }
         }
-        return;
+
+        // 2. Check chair drag
+        const layout = roomLayoutRef.current;
+        const totalSeats = Math.max(2, layout.seatCount || 8);
+        const activeChairs =
+          layout.customChairs && layout.customChairs.length === totalSeats
+            ? layout.customChairs
+            : computeDefaultChairs(layout, BASE_ROOM_WIDTH, BASE_ROOM_HEIGHT);
+
+        for (const chair of activeChairs) {
+          const cx = centerX + (chair.xRatio - 0.5) * BASE_ROOM_WIDTH;
+          const cy = centerY + chair.yRatio * BASE_ROOM_HEIGHT - BASE_ROOM_CENTER_Y;
+          if (Math.hypot(worldX - cx, worldY - cy) <= 18) {
+            draggingChairIdRef.current = chair.id;
+            onDragStateChange?.(true);
+            capturePointer();
+            if (!layout.customChairs || layout.customChairs.length !== totalSeats) {
+              onUpdateRoomLayout({ customChairs: activeChairs });
+            }
+            return;
+          }
+        }
+
+        // 3. Check table resize corner handle
+        const tableW = BASE_ROOM_WIDTH * layout.tableWidthRatio;
+        const tableH = BASE_ROOM_HEIGHT * layout.tableHeightRatio;
+        const isRound = layout.tableShape === 'round';
+        const roundR = Math.min(tableW, tableH) * 0.48;
+        const handleX = isRound ? centerX + roundR * Math.cos(Math.PI / 4) : centerX + tableW / 2;
+        const handleY = isRound ? centerY + roundR * Math.sin(Math.PI / 4) : centerY + tableH / 2;
+
+        if (Math.hypot(worldX - handleX, worldY - handleY) <= 20) {
+          isResizingTableRef.current = true;
+          onDragStateChange?.(true);
+          capturePointer();
+          return;
+        }
       }
-    }
 
-    // 3. Check table resize corner handle
-    const tableW = BASE_ROOM_WIDTH * layout.tableWidthRatio;
-    const tableH = BASE_ROOM_HEIGHT * layout.tableHeightRatio;
-    const isRound = layout.tableShape === 'round';
-    const roundR = Math.min(tableW, tableH) * 0.48;
-    const handleX = isRound ? centerX + roundR * Math.cos(Math.PI / 4) : centerX + tableW / 2;
-    const handleY = isRound ? centerY + roundR * Math.sin(Math.PI / 4) : centerY + tableH / 2;
+      // 4. Start Map Panning when dragging empty floor (or in read-only monitor mode)
+      isPanningMapRef.current = true;
+      panStartMouseRef.current = { x: mouseX, y: mouseY };
+      panStartOffsetRef.current = { ...panOffsetRef.current };
+      capturePointer();
+    },
+    [canEdit, onDragStateChange, onUpdateRoomLayout]
+  );
 
-    if (Math.hypot(worldX - handleX, worldY - handleY) < 20) {
-      isResizingTableRef.current = true;
-      return;
-    }
-
-    // 4. Start Map Panning when dragging empty floor
-    isPanningMapRef.current = true;
-    panStartMouseRef.current = { x: mouseX, y: mouseY };
-    panStartOffsetRef.current = { ...panOffsetRef.current };
-  }, [onUpdateRoomLayout]);
-
-  const handleMouseMove = useCallback(
-    (e: React.MouseEvent<HTMLCanvasElement>) => {
+  const handlePointerMove = useCallback(
+    (e: React.PointerEvent<HTMLCanvasElement>) => {
       const canvas = canvasRef.current;
       if (!canvas) return;
       const rect = canvas.getBoundingClientRect();
@@ -346,24 +373,25 @@ export const SmartRoomDirectorCanvas: React.FC<SmartRoomDirectorCanvasProps> = (
       const worldX = centerX + (mouseX - centerX - pan.x) / zoom;
       const worldY = centerY + (mouseY - centerY - pan.y) / zoom;
 
-      if (draggingCamIdRef.current) {
+      if (canEdit && draggingCamIdRef.current) {
         const xRatio = Math.max(0.04, Math.min(0.96, ((worldX - centerX) + BASE_ROOM_CENTER_X) / BASE_ROOM_WIDTH));
         const yRatio = Math.max(0.04, Math.min(0.96, ((worldY - centerY) + BASE_ROOM_CENTER_Y) / BASE_ROOM_HEIGHT));
         onUpdateCamera(draggingCamIdRef.current, { xRatio, yRatio });
-      } else if (draggingChairIdRef.current) {
+      } else if (canEdit && draggingChairIdRef.current) {
         const xRatio = Math.max(0.05, Math.min(0.95, ((worldX - centerX) + BASE_ROOM_CENTER_X) / BASE_ROOM_WIDTH));
         const yRatio = Math.max(0.05, Math.min(0.95, ((worldY - centerY) + BASE_ROOM_CENTER_Y) / BASE_ROOM_HEIGHT));
         const layout = roomLayoutRef.current;
         const totalSeats = Math.max(2, layout.seatCount || 8);
-        const activeChairs = (layout.customChairs && layout.customChairs.length === totalSeats)
-          ? layout.customChairs
-          : computeDefaultChairs(layout, BASE_ROOM_WIDTH, BASE_ROOM_HEIGHT);
+        const activeChairs =
+          layout.customChairs && layout.customChairs.length === totalSeats
+            ? layout.customChairs
+            : computeDefaultChairs(layout, BASE_ROOM_WIDTH, BASE_ROOM_HEIGHT);
 
         const updatedChairs = activeChairs.map((c) =>
           c.id === draggingChairIdRef.current ? { ...c, xRatio, yRatio } : c
         );
         onUpdateRoomLayout({ customChairs: updatedChairs });
-      } else if (isResizingTableRef.current) {
+      } else if (canEdit && isResizingTableRef.current) {
         const isRound = roomLayoutRef.current.tableShape === 'round';
         if (isRound) {
           const dist = Math.hypot(worldX - centerX, worldY - centerY);
@@ -383,13 +411,14 @@ export const SmartRoomDirectorCanvas: React.FC<SmartRoomDirectorCanvasProps> = (
             tableHeightRatio: Math.round(tableHeightRatio * 100) / 100,
           });
         }
-      } else {
+      } else if (canEdit) {
         // Hover detection for cameras
         let hoveringCam = false;
+        const camHitRadius = Math.max(24, 24 / zoom);
         for (const cam of camerasRef.current) {
           const camX = centerX + (cam.xRatio - 0.5) * BASE_ROOM_WIDTH;
           const camY = centerY + cam.yRatio * BASE_ROOM_HEIGHT - BASE_ROOM_CENTER_Y;
-          if (Math.hypot(worldX - camX, worldY - camY) < 20) {
+          if (Math.hypot(worldX - camX, worldY - camY) <= camHitRadius) {
             hoveringCam = true;
             break;
           }
@@ -400,14 +429,15 @@ export const SmartRoomDirectorCanvas: React.FC<SmartRoomDirectorCanvasProps> = (
         let foundChairId: string | null = null;
         const layout = roomLayoutRef.current;
         const totalSeats = Math.max(2, layout.seatCount || 8);
-        const activeChairs = (layout.customChairs && layout.customChairs.length === totalSeats)
-          ? layout.customChairs
-          : computeDefaultChairs(layout, BASE_ROOM_WIDTH, BASE_ROOM_HEIGHT);
+        const activeChairs =
+          layout.customChairs && layout.customChairs.length === totalSeats
+            ? layout.customChairs
+            : computeDefaultChairs(layout, BASE_ROOM_WIDTH, BASE_ROOM_HEIGHT);
 
         for (const chair of activeChairs) {
           const cx = centerX + (chair.xRatio - 0.5) * BASE_ROOM_WIDTH;
           const cy = centerY + chair.yRatio * BASE_ROOM_HEIGHT - BASE_ROOM_CENTER_Y;
-          if (Math.hypot(worldX - cx, worldY - cy) < 16) {
+          if (Math.hypot(worldX - cx, worldY - cy) <= 18) {
             foundChairId = chair.id;
             break;
           }
@@ -421,18 +451,32 @@ export const SmartRoomDirectorCanvas: React.FC<SmartRoomDirectorCanvasProps> = (
         const roundR = Math.min(tableW, tableH) * 0.48;
         const handleX = isRound ? centerX + roundR * Math.cos(Math.PI / 4) : centerX + tableW / 2;
         const handleY = isRound ? centerY + roundR * Math.sin(Math.PI / 4) : centerY + tableH / 2;
-        setIsHoveringResize(Math.hypot(worldX - handleX, worldY - handleY) < 18);
+        setIsHoveringResize(Math.hypot(worldX - handleX, worldY - handleY) <= 18);
       }
     },
-    [onUpdateCamera, onUpdateRoomLayout]
+    [canEdit, onUpdateCamera, onUpdateRoomLayout]
   );
 
-  const handleMouseUp = useCallback(() => {
-    draggingCamIdRef.current = null;
-    draggingChairIdRef.current = null;
-    isResizingTableRef.current = false;
-    isPanningMapRef.current = false;
-  }, []);
+  const handlePointerUp = useCallback(
+    (e: React.PointerEvent<HTMLCanvasElement>) => {
+      const canvas = canvasRef.current;
+      if (canvas) {
+        try {
+          if (canvas.hasPointerCapture(e.pointerId)) {
+            canvas.releasePointerCapture(e.pointerId);
+          }
+        } catch {}
+      }
+      if (draggingCamIdRef.current || draggingChairIdRef.current || isResizingTableRef.current) {
+        onDragStateChange?.(false);
+      }
+      draggingCamIdRef.current = null;
+      draggingChairIdRef.current = null;
+      isResizingTableRef.current = false;
+      isPanningMapRef.current = false;
+    },
+    [onDragStateChange]
+  );
 
   useEffect(() => {
     const canvas = canvasRef.current;
@@ -1105,8 +1149,8 @@ export const SmartRoomDirectorCanvas: React.FC<SmartRoomDirectorCanvasProps> = (
             </span>
           </div>
 
-          {/* Quick Camera Count Switcher */}
-          {onSetCameraCount && (
+          {/* Quick Camera Count Switcher (Admin only) */}
+          {canEdit && onSetCameraCount && (
             <div className="flex items-center bg-slate-900 border border-slate-800 rounded-lg p-0.5 text-[10px]">
               {[1, 2, 3].map((num) => (
                 <button
@@ -1138,47 +1182,51 @@ export const SmartRoomDirectorCanvas: React.FC<SmartRoomDirectorCanvasProps> = (
 
         {/* Interactive View Controls */}
         <div className="flex items-center space-x-2 shrink-0">
-          {/* Table Shape Switcher Toolbar */}
-          <div className="flex items-center bg-slate-900 border border-slate-800 rounded-lg p-0.5 text-[11px]">
-            <span className="px-1.5 text-slate-500 flex items-center space-x-1">
-              <Layout className="w-3 h-3" />
-              <span className="hidden sm:inline">Table:</span>
-            </span>
-            {shapeOptions.map((opt) => (
-              <button
-                key={opt.id}
-                onClick={() => onUpdateRoomLayout({ tableShape: opt.id, customChairs: null })}
-                className={`px-2 py-1 rounded font-medium capitalize transition ${
-                  roomLayout.tableShape === opt.id
-                    ? 'bg-emerald-600 text-slate-950 font-bold shadow'
-                    : 'text-slate-400 hover:text-slate-200'
-                }`}
-              >
-                {opt.label}
-              </button>
-            ))}
-          </div>
+          {canEdit && (
+            <>
+              {/* Table Shape Switcher Toolbar */}
+              <div className="flex items-center bg-slate-900 border border-slate-800 rounded-lg p-0.5 text-[11px]">
+                <span className="px-1.5 text-slate-500 flex items-center space-x-1">
+                  <Layout className="w-3 h-3" />
+                  <span className="hidden sm:inline">Table:</span>
+                </span>
+                {shapeOptions.map((opt) => (
+                  <button
+                    key={opt.id}
+                    onClick={() => onUpdateRoomLayout({ tableShape: opt.id, customChairs: null })}
+                    className={`px-2 py-1 rounded font-medium capitalize transition ${
+                      roomLayout.tableShape === opt.id
+                        ? 'bg-emerald-600 text-slate-950 font-bold shadow'
+                        : 'text-slate-400 hover:text-slate-200'
+                    }`}
+                  >
+                    {opt.label}
+                  </button>
+                ))}
+              </div>
 
-          {/* Table Dimensions & Layout Settings Popover Trigger */}
-          <button
-            onClick={() => setIsTableSettingsOpen(!isTableSettingsOpen)}
-            className={`px-2 py-1 rounded text-[11px] font-medium flex items-center space-x-1 border transition ${
-              isTableSettingsOpen
-                ? 'bg-slate-800 text-emerald-400 border-slate-700'
-                : 'bg-slate-900 text-slate-300 border-slate-800 hover:border-slate-700'
-            }`}
-            title="Adjust table dimensions, seating layout, and chairs"
-          >
-            <Maximize2 className="w-3 h-3 text-cyan-400" />
-            <span className="font-mono text-[10px]">
-              W {Math.round(roomLayout.tableWidthRatio * 100)}% × L {Math.round(roomLayout.tableHeightRatio * 100)}%
-            </span>
-            {isTableSettingsOpen ? (
-              <ChevronUp className="w-3 h-3" />
-            ) : (
-              <ChevronDown className="w-3 h-3" />
-            )}
-          </button>
+              {/* Table Dimensions & Layout Settings Popover Trigger */}
+              <button
+                onClick={() => setIsTableSettingsOpen(!isTableSettingsOpen)}
+                className={`px-2 py-1 rounded text-[11px] font-medium flex items-center space-x-1 border transition ${
+                  isTableSettingsOpen
+                    ? 'bg-slate-800 text-emerald-400 border-slate-700'
+                    : 'bg-slate-900 text-slate-300 border-slate-800 hover:border-slate-700'
+                }`}
+                title="Adjust table dimensions, seating layout, and chairs"
+              >
+                <Maximize2 className="w-3 h-3 text-cyan-400" />
+                <span className="font-mono text-[10px]">
+                  W {Math.round(roomLayout.tableWidthRatio * 100)}% × L {Math.round(roomLayout.tableHeightRatio * 100)}%
+                </span>
+                {isTableSettingsOpen ? (
+                  <ChevronUp className="w-3 h-3" />
+                ) : (
+                  <ChevronDown className="w-3 h-3" />
+                )}
+              </button>
+            </>
+          )}
 
           {/* Zones Toggle */}
           <button
@@ -1194,20 +1242,22 @@ export const SmartRoomDirectorCanvas: React.FC<SmartRoomDirectorCanvasProps> = (
             <span>Zones</span>
           </button>
 
-          {/* Studio Setup Trigger */}
-          <button
-            onClick={onOpenStudioSettings}
-            className="px-2.5 py-1 rounded text-[11px] font-medium flex items-center space-x-1 bg-slate-800 hover:bg-slate-700 text-slate-200 border border-slate-700 transition-colors"
-            title="Configure camera positions, slew speeds, and Schmitt-trigger hysteresis"
-          >
-            <Sliders className="w-3.5 h-3.5 text-emerald-400" />
-            <span>Studio Setup</span>
-          </button>
+          {/* Studio Setup Trigger (Admin only) */}
+          {canEdit && (
+            <button
+              onClick={onOpenStudioSettings}
+              className="px-2.5 py-1 rounded text-[11px] font-medium flex items-center space-x-1 bg-slate-800 hover:bg-slate-700 text-slate-200 border border-slate-700 transition-colors"
+              title="Configure camera positions, slew speeds, and Schmitt-trigger hysteresis"
+            >
+              <Sliders className="w-3.5 h-3.5 text-emerald-400" />
+              <span>Studio Setup</span>
+            </button>
+          )}
         </div>
       </div>
 
-      {/* Expandable Table Dimensions & Chair Seating Settings Card */}
-      {isTableSettingsOpen && (
+      {/* Expandable Table Dimensions & Chair Seating Settings Card (Admin only) */}
+      {canEdit && isTableSettingsOpen && (
         <div className="bg-slate-950 border-b border-slate-800 px-5 py-3 text-xs grid grid-cols-1 sm:grid-cols-4 gap-4 items-center">
           {/* Width Slider */}
           <div className="space-y-1">
@@ -1338,30 +1388,38 @@ export const SmartRoomDirectorCanvas: React.FC<SmartRoomDirectorCanvasProps> = (
         </div>
       )}
 
-      {/* Canvas Viewport with Mouse Drag & Resize Handler */}
+      {/* Canvas Viewport with Pointer Drag & Resize Handler */}
       <div className="relative w-full overflow-hidden" style={{ height: `${canvasHeight}px` }}>
         <canvas
           ref={canvasRef}
-          onMouseDown={handleMouseDown}
-          onMouseMove={handleMouseMove}
-          onMouseUp={handleMouseUp}
-          onMouseLeave={handleMouseUp}
-          className={`w-full h-full block ${cursorClass}`}
+          onPointerDown={handlePointerDown}
+          onPointerMove={handlePointerMove}
+          onPointerUp={handlePointerUp}
+          onPointerCancel={handlePointerUp}
+          className={`w-full h-full block touch-none select-none ${cursorClass}`}
         />
         {/* Interactive Hints Overlay */}
         <div className="absolute top-2 left-3 flex flex-wrap items-center gap-2 pointer-events-none">
-          <div className="px-2 py-1 rounded bg-slate-950/80 border border-slate-800 text-[10px] text-slate-400 flex items-center space-x-1 backdrop-blur-sm">
-            <Move className="w-3 h-3 text-cyan-400" />
-            <span>Drag cameras</span>
-          </div>
-          <div className="px-2 py-1 rounded bg-slate-950/80 border border-slate-800 text-[10px] text-slate-400 flex items-center space-x-1 backdrop-blur-sm">
-            <Move className="w-3 h-3 text-indigo-400" />
-            <span>Drag chairs to rearrange</span>
-          </div>
-          <div className="px-2 py-1 rounded bg-slate-950/80 border border-slate-800 text-[10px] text-slate-400 flex items-center space-x-1 backdrop-blur-sm">
-            <Maximize2 className="w-3 h-3 text-emerald-400" />
-            <span>Drag handle to resize table</span>
-          </div>
+          {canEdit ? (
+            <>
+              <div className="px-2 py-1 rounded bg-slate-950/80 border border-slate-800 text-[10px] text-slate-400 flex items-center space-x-1 backdrop-blur-sm">
+                <Move className="w-3 h-3 text-cyan-400" />
+                <span>Drag cameras</span>
+              </div>
+              <div className="px-2 py-1 rounded bg-slate-950/80 border border-slate-800 text-[10px] text-slate-400 flex items-center space-x-1 backdrop-blur-sm">
+                <Move className="w-3 h-3 text-indigo-400" />
+                <span>Drag chairs to rearrange</span>
+              </div>
+              <div className="px-2 py-1 rounded bg-slate-950/80 border border-slate-800 text-[10px] text-slate-400 flex items-center space-x-1 backdrop-blur-sm">
+                <Maximize2 className="w-3 h-3 text-emerald-400" />
+                <span>Drag handle to resize table</span>
+              </div>
+            </>
+          ) : (
+            <div className="px-2 py-1 rounded bg-slate-950/80 border border-blue-900/60 text-[10px] text-blue-300 flex items-center space-x-1 backdrop-blur-sm">
+              <span>Read-Only Monitor (Sign in as Admin to edit layout)</span>
+            </div>
+          )}
           <div className="px-2 py-1 rounded bg-slate-950/80 border border-slate-800 text-[10px] text-slate-400 flex items-center space-x-1 backdrop-blur-sm">
             <Hand className="w-3 h-3 text-amber-400" />
             <span>Drag floor to pan</span>
@@ -1437,12 +1495,13 @@ export const SmartRoomDirectorCanvas: React.FC<SmartRoomDirectorCanvasProps> = (
           {cameras.map((c) => (
             <button
               key={c.id}
-              onClick={() => onSelectManualLiveCam(c.id)}
+              onClick={() => canEdit && onSelectManualLiveCam(c.id)}
+              disabled={!canEdit}
               className={`flex items-center space-x-1.5 px-2.5 py-1 rounded-md border transition ${
                 c.isLive
                   ? 'bg-emerald-950/90 border-emerald-500 text-emerald-300 font-bold shadow'
                   : 'bg-slate-900 border-slate-800 text-slate-300 hover:border-slate-700'
-              }`}
+              } ${!canEdit ? 'cursor-default' : ''}`}
             >
               <span
                 className={`w-2 h-2 rounded-full ${

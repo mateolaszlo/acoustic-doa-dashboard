@@ -1,7 +1,11 @@
 import { useState, useEffect, useCallback } from 'react';
-import { DeviceCalibration } from '../types/api_types.js';
+import { DeviceCalibration, DeviceConfigSsePayload } from '../types/api_types.js';
 
-export function useDeviceConfig(deviceId: number, token?: string | null) {
+export function useDeviceConfig(
+  deviceId: number,
+  token?: string | null,
+  latestDeviceConfig?: DeviceConfigSsePayload | null
+) {
   const [config, setConfig] = useState<DeviceCalibration | null>(null);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -11,7 +15,14 @@ export function useDeviceConfig(deviceId: number, token?: string | null) {
     setLoading(true);
     setError(null);
     try {
-      const res = await fetch(`/api/v1/devices/${deviceId}/config`);
+      const headers: Record<string, string> = {};
+      if (token) {
+        headers['Authorization'] = `Bearer ${token}`;
+      }
+      const res = await fetch(`/api/v1/devices/${deviceId}/config`, {
+        credentials: 'include',
+        headers,
+      });
       if (!res.ok) {
         throw new Error(`Failed to load config (HTTP ${res.status})`);
       }
@@ -22,11 +33,17 @@ export function useDeviceConfig(deviceId: number, token?: string | null) {
     } finally {
       setLoading(false);
     }
-  }, [deviceId]);
+  }, [deviceId, token]);
 
   useEffect(() => {
     fetchConfig();
   }, [fetchConfig]);
+
+  useEffect(() => {
+    if (latestDeviceConfig && latestDeviceConfig.deviceId === deviceId && latestDeviceConfig.calibration) {
+      setConfig(latestDeviceConfig.calibration);
+    }
+  }, [latestDeviceConfig, deviceId]);
 
   const updateConfig = async (partial: Partial<DeviceCalibration>) => {
     setLoading(true);
@@ -40,6 +57,7 @@ export function useDeviceConfig(deviceId: number, token?: string | null) {
 
       const res = await fetch(`/api/v1/devices/${deviceId}/config`, {
         method: 'PUT',
+        credentials: 'include',
         headers,
         body: JSON.stringify(partial),
       });
@@ -76,6 +94,7 @@ export function useDeviceConfig(deviceId: number, token?: string | null) {
 
       const res = await fetch(`/api/v1/devices/${deviceId}/calibrate/zero-angle`, {
         method: 'POST',
+        credentials: 'include',
         headers,
         body: JSON.stringify({ sample_count: sampleCount }),
       });

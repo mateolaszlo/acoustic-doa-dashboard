@@ -47,7 +47,7 @@ export const Header: React.FC<HeaderProps> = ({
   const [devices, setDevices] = useState<DeviceSummary[]>([]);
 
   useEffect(() => {
-    fetch('/api/v1/devices')
+    fetch('/api/v1/devices', { credentials: 'include' })
       .then((res) => (res.ok ? res.json() : []))
       .then((data) => {
         if (Array.isArray(data) && data.length > 0) {

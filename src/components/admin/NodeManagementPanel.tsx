@@ -30,7 +30,7 @@ export const NodeManagementPanel: React.FC<NodeManagementPanelProps> = ({
   currentDeviceId,
   onSelectDevice,
 }) => {
-  const { token } = useAuth();
+  const { token, isAdmin } = useAuth();
   const [nodes, setNodes] = useState<DeviceAdminDetails[]>([]);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -66,13 +66,16 @@ export const NodeManagementPanel: React.FC<NodeManagementPanelProps> = ({
   const [isRotating, setIsRotating] = useState(false);
 
   const fetchNodes = useCallback(async () => {
-    if (!token) return;
+    if (!isAdmin) return;
     setLoading(true);
     setError(null);
 
     try {
+      const headers: Record<string, string> = {};
+      if (token) headers['Authorization'] = `Bearer ${token}`;
       const res = await fetch('/api/v1/devices', {
-        headers: { Authorization: `Bearer ${token}` },
+        credentials: 'include',
+        headers,
       });
 
       if (!res.ok) {
@@ -86,7 +89,7 @@ export const NodeManagementPanel: React.FC<NodeManagementPanelProps> = ({
     } finally {
       setLoading(false);
     }
-  }, [token]);
+  }, [isAdmin, token]);
 
   useEffect(() => {
     fetchNodes();
@@ -121,12 +124,12 @@ export const NodeManagementPanel: React.FC<NodeManagementPanelProps> = ({
     setError(null);
 
     try {
+      const headers: Record<string, string> = { 'Content-Type': 'application/json' };
+      if (token) headers['Authorization'] = `Bearer ${token}`;
       const res = await fetch(`/api/v1/devices/${nodeId}`, {
         method: 'PUT',
-        headers: {
-          'Content-Type': 'application/json',
-          Authorization: `Bearer ${token}`,
-        },
+        credentials: 'include',
+        headers,
         body: JSON.stringify({ name: editingName.trim() }),
       });
 
@@ -155,12 +158,12 @@ export const NodeManagementPanel: React.FC<NodeManagementPanelProps> = ({
         payload.apiKey = newCustomApiKey.trim();
       }
 
+      const headers: Record<string, string> = { 'Content-Type': 'application/json' };
+      if (token) headers['Authorization'] = `Bearer ${token}`;
       const res = await fetch('/api/v1/devices', {
         method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-          Authorization: `Bearer ${token}`,
-        },
+        credentials: 'include',
+        headers,
         body: JSON.stringify(payload),
       });
 
@@ -190,9 +193,12 @@ export const NodeManagementPanel: React.FC<NodeManagementPanelProps> = ({
     setError(null);
 
     try {
+      const headers: Record<string, string> = {};
+      if (token) headers['Authorization'] = `Bearer ${token}`;
       const res = await fetch(`/api/v1/devices/${rotateTarget.id}/api-key/rotate`, {
         method: 'POST',
-        headers: { Authorization: `Bearer ${token}` },
+        credentials: 'include',
+        headers,
       });
 
       const data = await res.json();
@@ -218,9 +224,12 @@ export const NodeManagementPanel: React.FC<NodeManagementPanelProps> = ({
     setError(null);
 
     try {
+      const headers: Record<string, string> = {};
+      if (token) headers['Authorization'] = `Bearer ${token}`;
       const res = await fetch(`/api/v1/devices/${purgeTarget.id}/measurements`, {
         method: 'DELETE',
-        headers: { Authorization: `Bearer ${token}` },
+        credentials: 'include',
+        headers,
       });
 
       const data = await res.json();
@@ -244,9 +253,12 @@ export const NodeManagementPanel: React.FC<NodeManagementPanelProps> = ({
     setError(null);
 
     try {
+      const headers: Record<string, string> = {};
+      if (token) headers['Authorization'] = `Bearer ${token}`;
       const res = await fetch(`/api/v1/devices/${deleteTarget.id}`, {
         method: 'DELETE',
-        headers: { Authorization: `Bearer ${token}` },
+        credentials: 'include',
+        headers,
       });
 
       const data = await res.json();

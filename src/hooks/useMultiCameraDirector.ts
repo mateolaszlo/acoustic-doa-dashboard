@@ -34,6 +34,48 @@ export interface UseMultiCameraDirectorOptions {
   latestStudioConfig?: StudioConfigPayload | null;
 }
 
+export function mergeDirectorAnimationFrame(
+  prevCameras: VirtualCamera[],
+  animatedCameras: VirtualCamera[],
+  hasBackendTelemetry: boolean
+): VirtualCamera[] {
+  let changed = false;
+  const next = prevCameras.map((prevCam) => {
+    const animCam = animatedCameras.find((a) => a.id === prevCam.id);
+    if (!animCam) return prevCam;
+
+    const panDiff = Math.abs(animCam.currentPanDeg - prevCam.currentPanDeg);
+    const panChanged = panDiff >= 0.05;
+    const liveChanged = animCam.isLive !== prevCam.isLive;
+    const fallbackChanged =
+      !hasBackendTelemetry &&
+      (animCam.assignedTargetSlot !== prevCam.assignedTargetSlot ||
+        animCam.isLockedOnSubject !== prevCam.isLockedOnSubject ||
+        Math.abs(animCam.targetPanDeg - prevCam.targetPanDeg) >= 0.05);
+
+    if (!panChanged && !liveChanged && !fallbackChanged) {
+      return prevCam;
+    }
+
+    changed = true;
+    return {
+      ...prevCam,
+      currentPanDeg: animCam.currentPanDeg,
+      isLive: animCam.isLive,
+      ...(hasBackendTelemetry
+        ? {}
+        : {
+            targetPanDeg: animCam.targetPanDeg,
+            assignedTargetSlot: animCam.assignedTargetSlot,
+            isLockedOnSubject: animCam.isLockedOnSubject,
+            lastTargetPos: animCam.lastTargetPos,
+          }),
+    };
+  });
+
+  return changed ? next : prevCameras;
+}
+
 export function useMultiCameraDirector({
   deviceId = 1,
   token = null,
@@ -87,13 +129,26 @@ export function useMultiCameraDirector({
   liveCamIdRef.current = liveCamId;
 
   const saveTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const isDraggingStudioRef = useRef<boolean>(false);
+
+  const setDraggingStudio = useCallback((isDragging: boolean) => {
+    isDraggingStudioRef.current = isDragging;
+  }, []);
 
   // 2. Fetch authoritative studio layout & cameras from backend on mount / deviceId change
   useEffect(() => {
     let isCancelled = false;
     setIsLoadingStudio(true);
 
-    fetch(`/api/v1/devices/${deviceId}/studio`)
+    const headers: Record<string, string> = {};
+    if (token) {
+      headers['Authorization'] = `Bearer ${token}`;
+    }
+
+    fetch(`/api/v1/devices/${deviceId}/studio`, {
+      credentials: 'include',
+      headers,
+    })
       .then((res) => (res.ok ? res.json() : null))
       .then((data: StudioConfigPayload | null) => {
         if (isCancelled || !data) return;
@@ -152,16 +207,23 @@ export function useMultiCameraDirector({
   useEffect(() => {
     if (!latestStudioConfig) return;
 
-    if (latestStudioConfig.roomLayout) {
+    if (!isDraggingStudioRef.current && latestStudioConfig.roomLayout) {
+      roomLayoutRef.current = latestStudioConfig.roomLayout;
       setRoomLayout(latestStudioConfig.roomLayout);
     }
     if (latestStudioConfig.cameras && Array.isArray(latestStudioConfig.cameras)) {
-      setCameras((prev) =>
-        latestStudioConfig.cameras.map((c) => {
+      setCameras((prev) => {
+        const next = latestStudioConfig.cameras.map((c) => {
           const ex = prev.find((p) => p.id === c.id);
+          // Do not overwrite coordinates while the user is actively dragging a camera in this window
+          if (isDraggingStudioRef.current && ex) {
+            return { ...c, xRatio: ex.xRatio, yRatio: ex.yRatio, currentPanDeg: ex.currentPanDeg };
+          }
           return { ...c, currentPanDeg: ex?.currentPanDeg ?? c.restingPanDeg };
-        })
-      );
+        });
+        camerasRef.current = next;
+        return next;
+      });
     }
     if (latestStudioConfig.directorConfig) {
       setDirectorConfig(latestStudioConfig.directorConfig);
@@ -217,7 +279,7 @@ export function useMultiCameraDirector({
       }>,
       immediate = false
     ) => {
-      if (!isAdmin || !token) return;
+      if (!isAdmin) return;
 
       if (saveTimeoutRef.current) {
         clearTimeout(saveTimeoutRef.current);
@@ -226,12 +288,14 @@ export function useMultiCameraDirector({
 
       const executeSave = async () => {
         try {
+          const headers: Record<string, string> = { 'Content-Type': 'application/json' };
+          if (token) {
+            headers['Authorization'] = `Bearer ${token}`;
+          }
           await fetch(`/api/v1/devices/${deviceId}/studio`, {
             method: 'PUT',
-            headers: {
-              'Content-Type': 'application/json',
-              Authorization: `Bearer ${token}`,
-            },
+            credentials: 'include',
+            headers,
             body: JSON.stringify(payload),
           });
         } catch (err) {
@@ -368,8 +432,11 @@ export function useMultiCameraDirector({
         };
       });
 
-      camerasRef.current = updatedCameras;
-      setCameras(updatedCameras);
+      setCameras((prev) => {
+        const merged = mergeDirectorAnimationFrame(prev, updatedCameras, hasBackendTelemetry);
+        camerasRef.current = merged;
+        return merged;
+      });
 
       return {
         activeCamera: updatedCameras.find((c) => c.id === currentLiveId) || null,
@@ -387,6 +454,7 @@ export function useMultiCameraDirector({
         if (partial.customChairs === null) {
           delete next.customChairs;
         }
+        roomLayoutRef.current = next;
         try {
           localStorage.setItem('acoustic_room_layout_config', JSON.stringify(next));
         } catch {}
@@ -430,6 +498,7 @@ export function useMultiCameraDirector({
           ...c,
           isLive: c.id === nextLiveId,
         }));
+        camerasRef.current = updatedWithLive;
 
         try {
           localStorage.setItem('acoustic_cameras_config', JSON.stringify(updatedWithLive));
@@ -446,6 +515,7 @@ export function useMultiCameraDirector({
     (id: string, partial: Partial<VirtualCamera>) => {
       setCameras((prev) => {
         const next = prev.map((c) => (c.id === id ? { ...c, ...partial } : c));
+        camerasRef.current = next;
         try {
           localStorage.setItem('acoustic_cameras_config', JSON.stringify(next));
         } catch {}
@@ -515,6 +585,7 @@ export function useMultiCameraDirector({
     updateConfig,
     updateRoomLayout,
     resetToDefaults,
+    setDraggingStudio,
   };
 }
 

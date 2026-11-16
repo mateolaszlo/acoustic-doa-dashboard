@@ -5,6 +5,8 @@ import {
   AcousticTrack,
   DirectorTelemetryState,
   StudioConfigPayload,
+  ZonesConfigSsePayload,
+  DeviceConfigSsePayload,
 } from '../types/api_types.js';
 
 interface UseSSEStreamOptions {
@@ -17,6 +19,8 @@ export function useSSEStream({ deviceId, maxBufferLength = 500 }: UseSSEStreamOp
   const [latestBatch, setLatestBatch] = useState<MeasurementBatchPayload | null>(null);
   const [latestDirectorState, setLatestDirectorState] = useState<DirectorTelemetryState | null>(null);
   const [latestStudioConfig, setLatestStudioConfig] = useState<StudioConfigPayload | null>(null);
+  const [latestZonesConfig, setLatestZonesConfig] = useState<ZonesConfigSsePayload | null>(null);
+  const [latestDeviceConfig, setLatestDeviceConfig] = useState<DeviceConfigSsePayload | null>(null);
   const [recentEvents, setRecentEvents] = useState<MeasurementEvent[]>([]);
   const [activeTracks, setActiveTracks] = useState<AcousticTrack[]>([]);
   const [bufferLimit, setBufferLimit] = useState<number>(maxBufferLength);
@@ -29,7 +33,7 @@ export function useSSEStream({ deviceId, maxBufferLength = 500 }: UseSSEStreamOp
 
   // Fetch initial global all-time count from database
   useEffect(() => {
-    fetch(`/api/v1/devices/${deviceId}/count`)
+    fetch(`/api/v1/devices/${deviceId}/count`, { credentials: 'include' })
       .then((res) => (res.ok ? res.json() : null))
       .then((data) => {
         if (data && typeof data.total === 'number') {
@@ -47,7 +51,7 @@ export function useSSEStream({ deviceId, maxBufferLength = 500 }: UseSSEStreamOp
     const sseUrl = `/api/v1/devices/${deviceId}/stream`;
     console.log(`[SSE] Connecting to ${sseUrl}...`);
 
-    const es = new EventSource(sseUrl);
+    const es = new EventSource(sseUrl, { withCredentials: true });
     eventSourceRef.current = es;
 
     es.addEventListener('connected', () => {
@@ -103,6 +107,24 @@ export function useSSEStream({ deviceId, maxBufferLength = 500 }: UseSSEStreamOp
         setLatestStudioConfig(studio);
       } catch (err) {
         console.error('[SSE] Failed to parse studio_config event:', err);
+      }
+    });
+
+    es.addEventListener('zones_config', (event) => {
+      try {
+        const payload: ZonesConfigSsePayload = JSON.parse(event.data);
+        setLatestZonesConfig(payload);
+      } catch (err) {
+        console.error('[SSE] Failed to parse zones_config event:', err);
+      }
+    });
+
+    es.addEventListener('device_config', (event) => {
+      try {
+        const payload: DeviceConfigSsePayload = JSON.parse(event.data);
+        setLatestDeviceConfig(payload);
+      } catch (err) {
+        console.error('[SSE] Failed to parse device_config event:', err);
       }
     });
 
@@ -164,6 +186,8 @@ export function useSSEStream({ deviceId, maxBufferLength = 500 }: UseSSEStreamOp
     latestBatch,
     latestDirectorState,
     latestStudioConfig,
+    latestZonesConfig,
+    latestDeviceConfig,
     recentEvents,
     activeTracks,
     bufferLimit,

@@ -27,7 +27,7 @@ export const AcousticHeatmap: React.FC<AcousticHeatmapProps> = ({ deviceId, late
         if (activeSince) {
           url += `&since_ms=${activeSince}`;
         }
-        const res = await fetch(url);
+        const res = await fetch(url, { credentials: 'include' });
         if (res.ok) {
           const data = await res.json();
           setStats(data);
